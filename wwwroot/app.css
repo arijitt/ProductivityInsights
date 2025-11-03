@@ -219,3 +219,56 @@ html[data-bs-theme="dark"] body {
 [data-bs-theme="dark"] main {
     background-color: #212529;
 }
+
+/* Modal styles */
+.analysis-params {
+    padding: 1rem;
+}
+
+.analysis-params .parameter-section {
+    margin-bottom: 1rem;
+}
+
+.analysis-params table {
+    margin-top: 1rem;
+}
+
+.analysis-params td {
+    padding: 0.75rem;
+}
+
+[data-bs-theme="dark"] .modal-content {
+    background-color: #2b3035;
+    color: #dee2e6;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .modal-header {
+    border-bottom-color: #495057;
+}
+
+[data-bs-theme="dark"] .modal-footer {
+    border-top-color: #495057;
+}
+
+[data-bs-theme="dark"] .modal-body {
+    background-color: #212529;
+}
+
+[data-bs-theme="dark"] .btn-close {
+    filter: invert(1);
+}
+
+[data-bs-theme="dark"] .table {
+    color: #dee2e6;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .table-bordered {
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .table td,
+[data-bs-theme="dark"] .table th {
+    border-color: #495057;
+}

@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@inject IJSRuntime JSRuntime
 
 <PageTitle>Productivity Overview</PageTitle>
 
@@ -55,6 +56,30 @@
     </div>
 </div>
 
+<!-- Modal for showing analysis parameters -->
+<div class="modal fade" id="analysisModal" tabindex="-1" aria-labelledby="analysisModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="analysisModalLabel">Analysis Parameters</h5>
+                <button type="button" class="btn-close" @onclick="CloseModal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (!string.IsNullOrEmpty(analysisParameters))
+                {
+                    <div class="analysis-params">
+                        @((MarkupString)analysisParameters)
+                    </div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="CloseModal">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="ConfirmAnalysis">Confirm & Run</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @code {
     private string selectedOrganization = "msdata";
     private string selectedProject = "A365";
@@ -68,6 +93,7 @@
     private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
     private DateTime? startDateTime = DateTime.Now.AddDays(-30);
     private DateTime? endDateTime = DateTime.Now;
+    private string analysisParameters = string.Empty;
 
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
@@ -357,7 +383,81 @@
 
     private async Task ProcessAnalysis()
     {
-        // TODO: Implement the analysis logic based on selectedOption, selectedOrganization, selectedProject, selectedTeam, and selectedAreaPath
+        analysisParameters = BuildAnalysisParametersHtml();
+        await JSRuntime.InvokeVoidAsync("showModal", "analysisModal");
+    }
+
+    private string BuildAnalysisParametersHtml()
+    {
+        var html = new System.Text.StringBuilder();
+        html.Append("<div class='parameter-section'>");
+        html.Append($"<h6 class='fw-bold text-primary mb-3'>Analysis Type: {GetAnalysisTypeName()}</h6>");
+        
+        html.Append("<table class='table table-sm table-bordered'>");
+        html.Append("<tbody>");
+        
+        // Common parameters
+        if (selectedOption != "icmResolutions")
+        {
+            html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Organization</td><td>{selectedOrganization}</td></tr>");
+            html.Append($"<tr><td class='fw-bold'>Project</td><td>{selectedProject}</td></tr>");
+        }
+        
+        // Work Items specific
+        if (selectedOption == "workItems")
+        {
+            if (selectedProject == "A365")
+            {
+                html.Append($"<tr><td class='fw-bold'>Team Name</td><td>{selectedTeam}</td></tr>");
+            }
+            html.Append($"<tr><td class='fw-bold'>Area Path</td><td>{selectedAreaPath}</td></tr>");
+        }
+        
+        // Git Commits specific
+        if (selectedOption == "gitCommits")
+        {
+            html.Append($"<tr><td class='fw-bold'>Git Repository</td><td>{selectedGitRepository}</td></tr>");
+            html.Append($"<tr><td class='fw-bold'>Target Branch</td><td>{selectedTargetBranch}</td></tr>");
+        }
+        
+        // ICM Resolutions specific
+        if (selectedOption == "icmResolutions")
+        {
+            html.Append($"<tr><td class='fw-bold'>Owning Team</td><td>{selectedOwningTeam}</td></tr>");
+            html.Append($"<tr><td class='fw-bold'>Key Vault URL</td><td>{selectedKeyVaultUrl}</td></tr>");
+            html.Append($"<tr><td class='fw-bold'>Certificate Name</td><td>{selectedKeyVaultCertificateName}</td></tr>");
+        }
+        
+        // Date range (common for all)
+        html.Append($"<tr><td class='fw-bold'>Start Date Time</td><td>{startDateTime?.ToString("yyyy-MM-dd HH:mm") ?? "Not set"}</td></tr>");
+        html.Append($"<tr><td class='fw-bold'>End Date Time</td><td>{endDateTime?.ToString("yyyy-MM-dd HH:mm") ?? "Not set"}</td></tr>");
+        
+        html.Append("</tbody></table>");
+        html.Append("</div>");
+        
+        return html.ToString();
+    }
+
+    private string GetAnalysisTypeName()
+    {
+        return selectedOption switch
+        {
+            "workItems" => "Work Items Analysis",
+            "gitCommits" => "Git Commits Analysis",
+            "icmResolutions" => "ICM Resolutions Analysis",
+            _ => "Unknown Analysis"
+        };
+    }
+
+    private async Task CloseModal()
+    {
+        await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
+    }
+
+    private async Task ConfirmAnalysis()
+    {
+        await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
+        // TODO: Implement the actual analysis logic here
         await Task.CompletedTask;
     }
 }
