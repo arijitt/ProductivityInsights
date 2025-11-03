@@ -1,0 +1,363 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>Productivity Overview</PageTitle>
+
+<div class="container mt-4">
+    <h1 class="text-center mb-4 fw-bold">Productivity Analysis</h1>
+
+    <ul class="nav nav-tabs mb-4 shadow-sm" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fs-5 fw-bold @(selectedOption == "workItems" ? "active" : "")" 
+                    type="button" 
+                    @onclick="@(() => OnOptionSelected("workItems"))">
+                Work Items
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fs-5 fw-bold @(selectedOption == "gitCommits" ? "active" : "")" 
+                    type="button" 
+                    @onclick="@(() => OnOptionSelected("gitCommits"))">
+                Git Commits
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fs-5 fw-bold @(selectedOption == "icmResolutions" ? "active" : "")" 
+                    type="button" 
+                    @onclick="@(() => OnOptionSelected("icmResolutions"))">
+                ICM Resolutions
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content shadow-sm border border-top-0 rounded-bottom p-4">
+        <div class="tab-pane fade @(selectedOption == "workItems" ? "show active" : "")" role="tabpanel">
+            @if (selectedOption == "workItems")
+            {
+                <h4 class="mb-4">Work Items Analysis</h4>
+                @RenderAnalysisForm()
+            }
+        </div>
+        <div class="tab-pane fade @(selectedOption == "gitCommits" ? "show active" : "")" role="tabpanel">
+            @if (selectedOption == "gitCommits")
+            {
+                <h4 class="mb-4">Git Commits Analysis</h4>
+                @RenderGitCommitsForm()
+            }
+        </div>
+        <div class="tab-pane fade @(selectedOption == "icmResolutions" ? "show active" : "")" role="tabpanel">
+            @if (selectedOption == "icmResolutions")
+            {
+                <h4 class="mb-4">ICM Resolutions Analysis</h4>
+                @RenderICMAnalysisForm()
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string selectedOrganization = "msdata";
+    private string selectedProject = "A365";
+    private string selectedOption = "workItems";
+    private string selectedTeam = "Cosmos on Azure Job Service";
+    private string selectedAreaPath = "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities";
+    private string selectedGitRepository = "BBC-VHD";
+    private string selectedTargetBranch = "master";
+    private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\CorePlatform";
+    private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
+    private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
+    private DateTime? startDateTime = DateTime.Now.AddDays(-30);
+    private DateTime? endDateTime = DateTime.Now;
+
+    private RenderFragment RenderAnalysisForm() => __builder =>
+    {
+        <div class="mb-4">
+            <label for="organizationSelect" class="form-label">Organization Name</label>
+            <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
+                <option value="msdata">msdata</option>
+                <option value="powerbi">powerbi</option>
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="projectSelect" class="form-label">Project Name</label>
+            <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
+                @if (selectedOrganization == "msdata")
+                {
+                    <option value="A365">A365</option>
+                    <option value="HDInsight">HDInsight</option>
+                }
+                else if (selectedOrganization == "powerbi")
+                {
+                    <option value="MWC">MWC</option>
+                }
+            </select>
+        </div>
+
+        @if (selectedProject == "A365")
+        {
+            <div class="mb-4">
+                <label for="teamSelect" class="form-label">Team Name</label>
+                <select id="teamSelect" class="form-select" @bind="selectedTeam">
+                    <option value="Cosmos on Azure Job Service">Cosmos on Azure Job Service</option>
+                    <option value="FastSpark">FastSpark</option>
+                    <option value="JS Reliability">JS Reliability</option>
+                    <option value="Job Service V2">Job Service V2</option>
+                    <option value="Lakehouse Job Execution and Capacities">Lakehouse Job Execution and Capacities</option>
+                </select>
+            </div>
+        }
+
+        <div class="mb-4">
+            <label for="areaPathSelect" class="form-label">Area Path</label>
+            <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
+                <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
+                <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
+                <option value="A365\FastSpark">A365\FastSpark</option>
+                <option value="A365\JS Reliability">A365\JS Reliability</option>
+                <option value="A365\Job Service V2">A365\Job Service V2</option>
+            </select>
+        </div>
+
+        <div class="datetime-group mb-4">
+            <div class="row">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    <label for="startDateTime" class="form-label">Start Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="startDateTime" class="form-control" @bind="startDateTime" />
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label for="endDateTime" class="form-label">End Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="endDateTime" class="form-control" @bind="endDateTime" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
+            Run Analysis
+        </button>
+    };
+
+    private RenderFragment RenderGitCommitsForm() => __builder =>
+    {
+        <div class="mb-4">
+            <label for="organizationSelect" class="form-label">Organization Name</label>
+            <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
+                <option value="msdata">msdata</option>
+                <option value="powerbi">powerbi</option>
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="projectSelect" class="form-label">Project Name</label>
+            <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
+                @if (selectedOrganization == "msdata")
+                {
+                    <option value="A365">A365</option>
+                    <option value="HDInsight">HDInsight</option>
+                }
+                else if (selectedOrganization == "powerbi")
+                {
+                    <option value="MWC">MWC</option>
+                }
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="gitRepositorySelect" class="form-label">Git Repositories</label>
+            <select id="gitRepositorySelect" class="form-select" @onchange="OnGitRepositoryChanged" value="@selectedGitRepository">
+                @if (selectedProject == "MWC")
+                {
+                    <option value="workload-sparkcore">workload-sparkcore</option>
+                    <option value="workload-lakehouse">workload-lakehouse</option>
+                    <option value="workload-genericcomputemanager">workload-genericcomputemanager</option>
+                    <option value="workload-vpaas">workload-vpaas</option>
+                    <option value="fabric-libraries">fabric-libraries</option>
+                    <option value="fabric-spark-load-testing-suite">fabric-spark-load-testing-suite</option>
+                    <option value="FeatureManagement">FeatureManagement</option>
+                    <option value="aspaas">aspaas</option>
+                }
+                else if (selectedProject == "HDInsight")
+                {
+                    <option value="wildfire-livy">wildfire-livy</option>
+                }
+                else if (selectedProject == "A365")
+                {
+                    <option value="BBC-VHD">BBC-VHD</option>
+                    <option value="BBC-Probes">BBC-Probes</option>
+                    <option value="SparkRuntimeTSGs">SparkRuntimeTSGs</option>
+                    <option value="marlin">marlin</option>
+                    <option value="nebula">nebula</option>
+                }
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="targetBranchSelect" class="form-label">Target Branch</label>
+            <select id="targetBranchSelect" class="form-select" @bind="selectedTargetBranch">
+                <option value="main" disabled="@(!IsMainBranchApplicable())">main</option>
+                <option value="master" disabled="@(!IsMasterBranchApplicable())">master</option>
+            </select>
+        </div>
+
+        <div class="datetime-group mb-4">
+            <div class="row">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    <label for="startDateTime" class="form-label">Start Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="startDateTime" class="form-control" @bind="startDateTime" />
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label for="endDateTime" class="form-label">End Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="endDateTime" class="form-control" @bind="endDateTime" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
+            Run Analysis
+        </button>
+    };
+
+    private RenderFragment RenderICMAnalysisForm() => __builder =>
+    {
+        <div class="mb-4">
+            <label for="owningTeamSelect" class="form-label">Owning Team</label>
+            <select id="owningTeamSelect" class="form-select" @bind="selectedOwningTeam">
+                <option value="AZURESYNAPSEJOBSERVICE\CorePlatform">AZURESYNAPSEJOBSERVICE\CorePlatform</option>
+                <option value="AZURESYNAPSEJOBSERVICE\JobPlatform">AZURESYNAPSEJOBSERVICE\JobPlatform</option>
+                <option value="AZURESYNAPSEJOBSERVICE\BBCTeam">AZURESYNAPSEJOBSERVICE\BBCTeam</option>
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="keyVaultUrlSelect" class="form-label">Key Vault URL</label>
+            <select id="keyVaultUrlSelect" class="form-select" @bind="selectedKeyVaultUrl">
+                <option value="https://icm-westus2.vault.azure.net">https://icm-westus2.vault.azure.net</option>
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="keyVaultCertificateNameSelect" class="form-label">Key Vault Certificate Name</label>
+            <select id="keyVaultCertificateNameSelect" class="form-select" @bind="selectedKeyVaultCertificateName">
+                <option value="ICM-WestUS2-AME">ICM-WestUS2-AME</option>
+            </select>
+        </div>
+
+        <div class="datetime-group mb-4">
+            <div class="row">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    <label for="startDateTime" class="form-label">Start Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="startDateTime" class="form-control" @bind="startDateTime" />
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label for="endDateTime" class="form-label">End Date Time</label>
+                    <div class="datetime-input-wrapper">
+                        <input type="datetime-local" id="endDateTime" class="form-control" @bind="endDateTime" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
+            Run Analysis
+        </button>
+    };
+
+    private void OnOptionSelected(string option)
+    {
+        selectedOption = option;
+    }
+
+    private void OnOrganizationChanged(ChangeEventArgs e)
+    {
+        selectedOrganization = e.Value?.ToString() ?? "msdata";
+        selectedProject = selectedOrganization == "msdata" ? "A365" : "MWC";
+        if (selectedProject == "A365")
+        {
+            selectedTeam = "Cosmos on Azure Job Service";
+            selectedGitRepository = "BBC-VHD";
+        }
+        else if (selectedProject == "MWC")
+        {
+            selectedGitRepository = "workload-sparkcore";
+        }
+    }
+
+    private void OnProjectChanged(ChangeEventArgs e)
+    {
+        selectedProject = e.Value?.ToString() ?? "A365";
+        if (selectedProject == "A365")
+        {
+            selectedTeam = "Cosmos on Azure Job Service";
+            selectedGitRepository = "BBC-VHD";
+        }
+        else if (selectedProject == "HDInsight")
+        {
+            selectedGitRepository = "wildfire-livy";
+        }
+        else if (selectedProject == "MWC")
+        {
+            selectedGitRepository = "workload-sparkcore";
+        }
+        selectedTargetBranch = GetTargetBranch();
+    }
+
+    private void OnGitRepositoryChanged(ChangeEventArgs e)
+    {
+        selectedGitRepository = e.Value?.ToString() ?? "BBC-VHD";
+        selectedTargetBranch = GetTargetBranch();
+    }
+
+    private string GetTargetBranch()
+    {
+        // Repositories that use "main" branch
+        var mainBranchRepos = new[] { "workload-sparkcore", "workload-lakehouse", "workload-genericcomputemanager", 
+                                      "workload-vpaas", "fabric-libraries", "fabric-spark-load-testing-suite", 
+                                      "SparkRuntimeTSGs", "nebula" };
+        
+        // Repositories that use "master" branch
+        var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
+                                        "BBC-VHD", "BBC-Probes", "marlin" };
+        
+        if (mainBranchRepos.Contains(selectedGitRepository))
+        {
+            return "main";
+        }
+        else if (masterBranchRepos.Contains(selectedGitRepository))
+        {
+            return "master";
+        }
+        
+        return "main"; // default
+    }
+
+    private bool IsMainBranchApplicable()
+    {
+        var mainBranchRepos = new[] { "workload-sparkcore", "workload-lakehouse", "workload-genericcomputemanager", 
+                                      "workload-vpaas", "fabric-libraries", "fabric-spark-load-testing-suite", 
+                                      "SparkRuntimeTSGs", "nebula" };
+        return mainBranchRepos.Contains(selectedGitRepository);
+    }
+
+    private bool IsMasterBranchApplicable()
+    {
+        var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
+                                        "BBC-VHD", "BBC-Probes", "marlin" };
+        return masterBranchRepos.Contains(selectedGitRepository);
+    }
+
+    private async Task ProcessAnalysis()
+    {
+        // TODO: Implement the analysis logic based on selectedOption, selectedOrganization, selectedProject, selectedTeam, and selectedAreaPath
+        await Task.CompletedTask;
+    }
+}

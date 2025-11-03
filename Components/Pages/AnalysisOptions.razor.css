@@ -1,0 +1,238 @@
+/* Enhanced datetime input styling */
+input[type="datetime-local"] {
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 2px solid #dee2e6;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
+    background-color: #fff;
+    cursor: pointer;
+    position: relative;
+}
+
+input[type="datetime-local"]:hover {
+    border-color: #0d6efd;
+    box-shadow: 0 0 15px rgba(13, 110, 253, 0.4),
+                0 0 30px rgba(13, 110, 253, 0.2),
+                0 0 45px rgba(13, 110, 253, 0.1);
+    transform: translateY(-1px);
+    background-color: #f8f9ff;
+    animation: glow-pulse 2s ease-in-out infinite;
+}
+
+input[type="datetime-local"]:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 20px rgba(13, 110, 253, 0.5),
+                0 0 40px rgba(13, 110, 253, 0.3),
+                0 0 60px rgba(13, 110, 253, 0.15);
+    outline: none;
+    transform: translateY(-2px);
+    z-index: 10;
+}
+
+/* Calendar icon styling */
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    border-radius: 4px;
+    margin-right: 2px;
+    opacity: 0.7;
+    filter: invert(0.5);
+    padding: 5px;
+    transition: all 0.2s ease;
+}
+
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+    background-color: rgba(13, 110, 253, 0.1);
+    filter: invert(0.3) sepia(1) saturate(5) hue-rotate(200deg);
+}
+
+/* Floating calendar popup styling */
+input[type="datetime-local"]::-webkit-datetime-edit {
+    padding: 0.25rem;
+}
+
+/* Style the calendar popup */
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    position: relative;
+    z-index: 20;
+}
+
+/* Create floating effect for the input container */
+.datetime-input-wrapper {
+    position: relative;
+    isolation: isolate;
+}
+
+.datetime-input-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 0.5rem;
+    pointer-events: none;
+    transition: all 0.3s ease;
+    z-index: -1;
+}
+
+.datetime-input-wrapper:has(input:focus)::after {
+    box-shadow: 0 8px 32px rgba(13, 110, 253, 0.2);
+    background: radial-gradient(circle at top, rgba(13, 110, 253, 0.05), transparent);
+}
+
+/* Date time container styling */
+.datetime-group {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 1.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    position: relative;
+    overflow: visible;
+}
+
+.datetime-group label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.datetime-group label::before {
+    content: "📅";
+    font-size: 1.2rem;
+}
+
+/* Enhance the visual boundary effect */
+.datetime-group::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: 0.85rem;
+    background: linear-gradient(135deg, #0d6efd20, #6610f220);
+    z-index: -1;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.datetime-group:has(input:focus)::before {
+    opacity: 1;
+}
+
+/* Glowing dropdown styling */
+select.form-select {
+    transition: all 0.3s ease;
+    border: 2px solid #dee2e6;
+    position: relative;
+}
+
+select.form-select:hover {
+    border-color: #0d6efd;
+    box-shadow: 0 0 15px rgba(13, 110, 253, 0.4),
+                0 0 30px rgba(13, 110, 253, 0.2),
+                0 0 45px rgba(13, 110, 253, 0.1);
+    transform: translateY(-1px);
+    background-color: #f8f9ff;
+}
+
+select.form-select:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 20px rgba(13, 110, 253, 0.5),
+                0 0 40px rgba(13, 110, 253, 0.3),
+                0 0 60px rgba(13, 110, 253, 0.15);
+    outline: none;
+    transform: translateY(-2px);
+}
+
+/* Add glow animation on hover */
+@keyframes glow-pulse {
+    0%, 100% {
+        box-shadow: 0 0 15px rgba(13, 110, 253, 0.4),
+                    0 0 30px rgba(13, 110, 253, 0.2),
+                    0 0 45px rgba(13, 110, 253, 0.1);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(13, 110, 253, 0.5),
+                    0 0 40px rgba(13, 110, 253, 0.3),
+                    0 0 60px rgba(13, 110, 253, 0.15);
+    }
+}
+
+select.form-select:hover {
+    animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Dark Mode Overrides */
+[data-bs-theme="dark"] input[type="datetime-local"] {
+    background-color: #2b3035;
+    border-color: #495057;
+    color: #dee2e6;
+}
+
+[data-bs-theme="dark"] input[type="datetime-local"]:hover {
+    background-color: #1a1d20;
+    border-color: #0d6efd;
+    box-shadow: 0 0 15px rgba(110, 168, 254, 0.4),
+                0 0 30px rgba(110, 168, 254, 0.2),
+                0 0 45px rgba(110, 168, 254, 0.1);
+}
+
+[data-bs-theme="dark"] input[type="datetime-local"]:focus {
+    background-color: #1a1d20;
+    border-color: #6ea8fe;
+    box-shadow: 0 0 20px rgba(110, 168, 254, 0.5),
+                0 0 40px rgba(110, 168, 254, 0.3),
+                0 0 60px rgba(110, 168, 254, 0.15);
+}
+
+[data-bs-theme="dark"] .datetime-group {
+    background: linear-gradient(135deg, #2b3035 0%, #1a1d20 100%);
+    border-color: #495057;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+[data-bs-theme="dark"] .datetime-group label {
+    color: #dee2e6;
+}
+
+[data-bs-theme="dark"] .datetime-group::before {
+    background: linear-gradient(135deg, #0d6efd40, #6610f240);
+}
+
+[data-bs-theme="dark"] select.form-select {
+    background-color: #2b3035;
+    border-color: #495057;
+    color: #dee2e6;
+}
+
+[data-bs-theme="dark"] select.form-select:hover {
+    background-color: #1a1d20;
+    border-color: #0d6efd;
+    box-shadow: 0 0 15px rgba(110, 168, 254, 0.4),
+                0 0 30px rgba(110, 168, 254, 0.2),
+                0 0 45px rgba(110, 168, 254, 0.1);
+}
+
+[data-bs-theme="dark"] select.form-select:focus {
+    background-color: #1a1d20;
+    border-color: #6ea8fe;
+    box-shadow: 0 0 20px rgba(110, 168, 254, 0.5),
+                0 0 40px rgba(110, 168, 254, 0.3),
+                0 0 60px rgba(110, 168, 254, 0.15);
+}
+
+[data-bs-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+}
+
+[data-bs-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+    background-color: rgba(110, 168, 254, 0.2);
+    filter: invert(1) sepia(1) saturate(5) hue-rotate(200deg);
+}
