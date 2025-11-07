@@ -62,7 +62,9 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="analysisModalLabel">Analysis Parameters</h5>
-                <button type="button" class="btn-close" @onclick="CloseModal" aria-label="Close"></button>
+                <button type="button" class="btn-close" @onclick="CloseModal" aria-label="Close">
+                    <span aria-hidden="true">✕</span>
+                </button>
             </div>
             <div class="modal-body">
                 @if (!string.IsNullOrEmpty(analysisParameters))
