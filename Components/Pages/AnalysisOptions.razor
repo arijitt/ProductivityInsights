@@ -1,4 +1,8 @@
 @page "/"
+@using ProductivityInsights.Metrics
+@using ProductivityInsights.Models
+@using ProductivityInsights.Options
+@using ProductivityInsights.Utilities
 @rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
 
@@ -54,6 +58,23 @@
             }
         </div>
     </div>
+
+    @if (!string.IsNullOrEmpty(analysisResultHtml))
+    {
+        <div class="analysis-results mt-4">
+            <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
+                <span aria-hidden="true">×</span>
+            </button>
+            @if (selectedOption == "gitCommits")
+            {
+                @RenderGitCommitsResults()
+            }
+            else
+            {
+                @((MarkupString)analysisResultHtml)
+            }
+        </div>
+    }
 </div>
 
 <!-- Modal for showing analysis parameters -->
@@ -83,20 +104,7 @@
 </div>
 
 @code {
-    private string selectedOrganization = "msdata";
-    private string selectedProject = "A365";
-    private string selectedOption = "workItems";
-    private string selectedTeam = "Cosmos on Azure Job Service";
-    private string selectedAreaPath = "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities";
-    private string selectedGitRepository = "BBC-VHD";
-    private string selectedTargetBranch = "master";
-    private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\CorePlatform";
-    private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
-    private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
-    private DateTime? startDateTime = DateTime.Now.AddDays(-30);
-    private DateTime? endDateTime = DateTime.Now;
-    private string analysisParameters = string.Empty;
-
+   
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
         <div class="mb-4">
@@ -386,7 +394,46 @@
     private async Task ProcessAnalysis()
     {
         analysisParameters = BuildAnalysisParametersHtml();
+        analysisResultHtml = string.Empty;
         await JSRuntime.InvokeVoidAsync("showModal", "analysisModal");
+    }
+
+    private WorkItemQueryOptions GetWorkItemQueryOptions()
+    {
+        return new WorkItemQueryOptions
+        {
+            OrganizationName = selectedOrganization,
+            ProjectName = selectedProject,
+            TeamName = selectedTeam,
+            AreaPath = selectedAreaPath,
+            StartDateTime = startDateTime,
+            EndDateTime = endDateTime
+        };
+    }
+
+    private CommitQueryOptions GetCommitQueryOptions()
+    {
+        return new CommitQueryOptions
+        {
+            OrganizationName = selectedOrganization,
+            ProjectName = selectedProject,
+            GitRepositoryName = selectedGitRepository,
+            TargetBranchName = selectedTargetBranch,
+            StartDateTime = startDateTime,
+            EndDateTime = endDateTime
+        };
+    }
+
+    private IncidentQueryOptions GetIncidentQueryOptions()
+    {
+        return new IncidentQueryOptions
+        {
+            OwningTeam = selectedOwningTeam,
+            KeyVaultUrl = selectedKeyVaultUrl,
+            KeyVaultCertificateName = selectedKeyVaultCertificateName,
+            StartDateTime = startDateTime,
+            EndDateTime = endDateTime
+        };
     }
 
     private string BuildAnalysisParametersHtml()
@@ -456,10 +503,209 @@
         await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
     }
 
+    private void CloseAnalysisResults()
+    {
+        analysisResultHtml = string.Empty;
+        expandedRows.Clear();
+    }
+
     private async Task ConfirmAnalysis()
     {
+        if (selectedOption == "gitCommits")
+        {
+            contributors = await GetCommitCollection();
+            analysisResultHtml = "gitCommits"; // Flag to render RenderGitCommitsResults
+        }
+        else
+        {
+            analysisResultHtml = string.Empty;
+        }
+
         await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
-        // TODO: Implement the actual analysis logic here
-        await Task.CompletedTask;
+        StateHasChanged();
+        
+        // Scroll to bottom to show the new results
+        try
+        {
+            await Task.Delay(100); // Small delay to ensure content is rendered
+            await JSRuntime.InvokeVoidAsync("scrollToBottom", true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error scrolling to bottom: {ex.Message}");
+            // Fallback: try native scroll
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("eval", "window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })");
+            }
+            catch { /* Ignore if this also fails */ }
+        }
     }
+
+    private RenderFragment RenderGitCommitsResults() => __builder =>
+    {
+        
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th colspan="3" class="text-center fw-bold table-title-header">
+                            Code Contribution Summary for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                        </th>
+                    </tr>
+                    <tr>
+                        <th scope="col">Contributor</th>
+                        <th scope="col">Summary</th>
+                        <th scope="col" style="width: 50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var contributor in contributors)
+                    {
+                        var isExpanded = expandedRows.Contains(contributor.Name);
+                        <tr class="contributor-row">
+                            <td class="fw-normal">@contributor.Name</td>
+                            <td>@contributor.Summary</td>
+                            <td class="text-center">
+                                <button class="btn btn-sm btn-link expand-btn" @onclick="() => ToggleRow(contributor.Name)">
+                                    <span class="@(isExpanded ? "expanded" : "")">@(isExpanded ? "−" : "+")</span>
+                                </button>
+                            </td>
+                        </tr>
+                        @if (isExpanded)
+                        {
+                            <tr class="details-row">
+                                <td colspan="3">
+                                    <div class="commit-details">
+                                        @((MarkupString)GetCommitDetails(contributor.Name))
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    };
+
+    private void ToggleRow(string contributorName)
+    {
+        if (expandedRows.Contains(contributorName))
+        {
+            expandedRows.Remove(contributorName);
+        }
+        else
+        {
+            expandedRows.Add(contributorName);
+        }
+    }
+
+    private async Task<List<(string Name, string Summary)>> GetCommitCollection()
+    {
+        CommitQueryOptions commitQueryOptions = GetCommitQueryOptions();
+
+        CommitCollection? commitCollection = await GitCommitMetrics.GetCommitsAsync(
+            commitQueryOptions.OrganizationName,
+            commitQueryOptions.ProjectName,
+            commitQueryOptions.GitRepositoryName,
+            commitQueryOptions.TargetBranchName,
+            commitQueryOptions.StartDateTime ?? DateTime.UtcNow.AddDays(-30),
+            commitQueryOptions.EndDateTime ?? DateTime.UtcNow);
+
+        if (commitCollection?.value == null || !commitCollection.value.Any())
+        {
+            return new List<(string Name, string Summary)>();
+        }
+
+        // Group commits by author/committer name and aggregate
+        var commitStatistics = commitCollection.value
+            .GroupBy(c => c.committer?.name ?? c.author?.name ?? "Unknown")
+            .Select(g => new
+            {
+                Name = g.Key,
+                CommitCount = g.Count(),
+                TotalAdded = g.Sum(c => c.changeCounts?.Add ?? 0),
+                TotalDeleted = g.Sum(c => c.changeCounts?.Delete ?? 0),
+                TotalEdited = g.Sum(c => c.changeCounts?.Edit ?? 0)
+            })
+            .OrderByDescending(x => x.CommitCount)
+            .ThenByDescending(x => x.TotalAdded + x.TotalDeleted + x.TotalEdited)
+            .Select(x => (
+                Name: x.Name,
+                Summary: $"{x.CommitCount} commit{(x.CommitCount != 1 ? "s" : "")} (+{x.TotalAdded}/-{x.TotalDeleted}/{x.TotalEdited} files)"
+            ))
+            .ToList();
+
+        return commitStatistics;
+    }
+
+    private string GetCommitDetails(string contributorName)
+    {
+        // Sample commit details - replace with actual data
+        var details = new System.Text.StringBuilder();
+        
+        if (contributorName == "Ravikiran Tangirala")
+        {
+            details.Append("<div class='commit-entry'>")
+                   .Append("<div class='commit-header'>🔄 Commit: <span class='commit-hash'>3ed2ce32...</span></div>")
+                   .Append("<div class='commit-info'><strong>Author:</strong> Ravikiran Tangirala &lt;Ravikiran.Tangirala@microsoft.com&gt;</div>")
+                   .Append("<div class='commit-info'><strong>Date:</strong> 2025-10-07 18:30:54</div>")
+                   .Append("<div class='commit-info'><strong>Message:</strong> Merged PR 1827477: TS proxy - Purview regex update</div>")
+                   .Append("<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+5 additions</span>, <span class='text-danger'>-5 deletions</span></div>")
+                   .Append("<div class='commit-files'><strong>📁 Changed Files (3):</strong>")
+                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-prod-eastus2euap.json [edit] (+2/-2)</div>")
+                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services2-prod-eastus2euap.json [edit] (+2/-2)</div>")
+                   .Append("<div class='file-item'>📄 /TokenService/Microsoft.Marlin.TokenService.UnitTests/Proxy/ActualEndpointsRegexTests.cs [edit] (+1/-1)</div>")
+                   .Append("</div>")
+                   .Append("<div class='commit-info'>🔗 <strong>Parents:</strong> 5b549dda...</div>")
+                   .Append("<div class='commit-info'>🌐 <strong>URL:</strong> <a href='https://dev.azure.com/msdata/A365/_git/Marlin/commit/3ed2ce32ab6931606fd67d8de3abfb0e5b573fb9' target='_blank'>View Commit</a></div>")
+                   .Append("</div>")
+                   .Append("<hr class='commit-separator'/>")
+                   .Append("<div class='commit-entry'>")
+                   .Append("<div class='commit-header'>🔄 Commit: <span class='commit-hash'>9d53f8d0...</span></div>")
+                   .Append("<div class='commit-info'><strong>Author:</strong> Ravikiran Tangirala &lt;Ravikiran.Tangirala@microsoft.com&gt;</div>")
+                   .Append("<div class='commit-info'><strong>Date:</strong> 2025-10-08 14:34:16</div>")
+                   .Append("<div class='commit-info'><strong>Message:</strong> Merged PR 1828511: Remove EH proxy regex</div>")
+                   .Append("<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+6 additions</span>, <span class='text-danger'>-6 deletions</span></div>")
+                   .Append("<div class='commit-files'><strong>📁 Changed Files (3):</strong>")
+                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-prod-eastus2euap.json [edit] (+2/-2)</div>")
+                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-triprod-eastus2euap.json [edit] (+2/-2)</div>")
+                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services2-prod-eastus2euap.json [edit] (+2/-2)</div>")
+                   .Append("</div>")
+                   .Append("<div class='commit-info'>🔗 <strong>Parents:</strong> f519503a...</div>")
+                   .Append("<div class='commit-info'>🌐 <strong>URL:</strong> <a href='https://dev.azure.com/msdata/A365/_git/Marlin/commit/9d53f8d0ed5f29a76da82aa0e808fe3f06c27479' target='_blank'>View Commit</a></div>")
+                   .Append("</div>");
+        }
+        else
+        {
+            details.Append("<div class='commit-entry'>")
+                   .Append($"<div class='commit-info'><em>Detailed commit information for {contributorName} will be loaded here...</em></div>")
+                   .Append("</div>");
+        }
+        
+        return details.ToString();
+    }
+
+    private string BuildGitCommitsSummaryHtml()
+    {
+        // This method is no longer used for gitCommits but kept for compatibility
+        return string.Empty;
+    }
+
+    private string selectedOrganization = "msdata";
+    private string selectedProject = "A365";
+    private string selectedOption = "workItems";
+    private string selectedTeam = "Cosmos on Azure Job Service";
+    private string selectedAreaPath = "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities";
+    private string selectedGitRepository = "BBC-VHD";
+    private string selectedTargetBranch = "master";
+    private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\CorePlatform";
+    private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
+    private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
+    private DateTime? startDateTime = DateTime.Now.AddDays(-30);
+    private DateTime? endDateTime = DateTime.Now;
+    private string analysisParameters = string.Empty;
+    private string analysisResultHtml = string.Empty;
+    private HashSet<string> expandedRows = new HashSet<string>();
+    private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
 }

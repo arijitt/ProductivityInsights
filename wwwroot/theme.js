@@ -179,3 +179,10 @@ window.hideModal = function(modalId) {
         document.body.classList.remove('modal-open');
     }
 };
+
+window.scrollToBottom = function(smooth = true) {
+    window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
+    });
+};

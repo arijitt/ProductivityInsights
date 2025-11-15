@@ -28,8 +28,8 @@
 
 :global(#analysisModal .modal-content) {
     background: rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(4px) saturate(160%);
+    -webkit-backdrop-filter: blur(4px) saturate(160%);
     border: 1px solid rgba(255, 255, 255, 0.3);
     box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
 }
@@ -37,8 +37,8 @@
 :global(#analysisModal .modal-header),
 :global(#analysisModal .modal-footer) {
     background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
 }
 
 /* Analysis modal light mode overrides */
@@ -354,4 +354,294 @@ select.form-select:hover {
     background-color: rgba(110, 168, 254, 0.2);
     filter: invert(1) sepia(1) saturate(5) hue-rotate(200deg);
 }
+
+.analysis-results {
+    margin-top: 2rem;
+    padding: 1.75rem;
+    background: rgba(255, 255, 255, 0.28);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 18px;
+    box-shadow: 0 16px 36px rgba(31, 38, 135, 0.22);
+    position: relative;
+}
+
+.analysis-close-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(220, 53, 69, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(220, 53, 69, 0.3);
+    color: #dc3545;
+    font-size: 1.5rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    z-index: 10;
+    opacity: 1;
+}
+
+.analysis-close-btn span {
+    display: inline-block;
+    transition: transform 0.3s ease;
+}
+
+.analysis-close-btn:hover {
+    background: rgba(220, 53, 69, 0.3);
+    border-color: rgba(220, 53, 69, 0.5);
+    opacity: 1;
+}
+
+.analysis-close-btn:hover span {
+    transform: rotate(90deg);
+}
+
+.analysis-results .table {
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.analysis-results .table th {
+    background: linear-gradient(135deg, rgba(13, 110, 253, 0.15), rgba(102, 16, 242, 0.1));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+    color: #0d1b3f;
+    letter-spacing: 0.05rem;
+}
+
+.analysis-results .table .table-title-header {
+    font-size: 1.25rem;
+    padding: 1rem;
+    letter-spacing: 0.1rem;
+}
+
+.analysis-results .table td,
+.analysis-results .table th {
+    border-color: rgba(13, 110, 253, 0.12);
+}
+
+[data-bs-theme="dark"] .analysis-results {
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    box-shadow: 0 20px 44px rgba(2, 6, 23, 0.55);
+}
+
+[data-bs-theme="dark"] .analysis-close-btn {
+    background: rgba(239, 68, 68, 0.2);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+[data-bs-theme="dark"] .analysis-close-btn:hover {
+    background: rgba(239, 68, 68, 0.35);
+    border-color: rgba(239, 68, 68, 0.5);
+    opacity: 1;
+}
+
+[data-bs-theme="dark"] .analysis-close-btn:hover span {
+    transform: rotate(90deg);
+}
+
+[data-bs-theme="dark"] .analysis-results .table {
+    background: rgba(30, 41, 59, 0.45);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+[data-bs-theme="dark"] .analysis-results .table th {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.25), rgba(124, 58, 237, 0.18));
+    color: #e2e8f0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+[data-bs-theme="dark"] .analysis-results .table .table-title-header {
+    font-size: 1.25rem;
+    padding: 1rem;
+    letter-spacing: 0.1rem;
+}
+
+[data-bs-theme="dark"] .analysis-results .table td,
+[data-bs-theme="dark"] .analysis-results .table th {
+    border-color: rgba(148, 163, 184, 0.2);
+    color: #e2e8f0;
+}
+
+[data-bs-theme="dark"] .analysis-results .table tbody tr {
+    color: #e2e8f0;
+}
+
+[data-bs-theme="dark"] .analysis-results .table tbody tr > * {
+    color: #e2e8f0 !important;
+}
+
+/* Expandable row styles */
+.expand-btn {
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    line-height: 1;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #0d6efd;
+    text-decoration: none;
+    border: none;
+    background: transparent;
+    transition: all 0.3s ease;
+}
+
+.expand-btn:hover {
+    color: #0a58ca;
+    transform: scale(1.1);
+}
+
+.expand-btn span {
+    display: inline-block;
+    transition: transform 0.3s ease;
+}
+
+.expand-btn span.expanded {
+    transform: rotate(180deg);
+}
+
+.details-row {
+    background: rgba(13, 110, 253, 0.03) !important;
+    animation: slideDown 0.3s ease-out;
+}
+
+.details-row td {
+    padding: 0 !important;
+}
+
+.commit-details {
+    padding: 1.5rem;
+    background: rgba(248, 249, 250, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 8px;
+    margin: 0.5rem;
+}
+
+.commit-entry {
+    margin-bottom: 1.5rem;
+}
+
+.commit-header {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #0d6efd;
+    margin-bottom: 0.75rem;
+}
+
+.commit-hash {
+    font-family: 'Courier New', monospace;
+    background: rgba(13, 110, 253, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.commit-info {
+    margin: 0.5rem 0;
+    line-height: 1.6;
+}
+
+.commit-stats {
+    margin: 0.75rem 0;
+    font-weight: 500;
+}
+
+.commit-files {
+    margin: 0.75rem 0;
+    padding-left: 0.5rem;
+}
+
+.file-item {
+    margin: 0.4rem 0;
+    padding-left: 1rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    color: #495057;
+}
+
+.commit-separator {
+    margin: 1.5rem 0;
+    border-top: 2px dashed rgba(13, 110, 253, 0.2);
+}
+
+.commit-info a {
+    color: #0d6efd;
+    text-decoration: none;
+}
+
+.commit-info a:hover {
+    text-decoration: underline;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Dark mode expandable row styles */
+[data-bs-theme="dark"] .expand-btn {
+    color: #6ea8fe;
+}
+
+[data-bs-theme="dark"] .expand-btn:hover {
+    color: #9ec5fe;
+}
+
+[data-bs-theme="dark"] .details-row {
+    background: rgba(37, 99, 235, 0.08) !important;
+}
+
+[data-bs-theme="dark"] .commit-details {
+    background: rgba(30, 41, 59, 0.6);
+    color: #e2e8f0;
+}
+
+[data-bs-theme="dark"] .commit-header {
+    color: #6ea8fe;
+}
+
+[data-bs-theme="dark"] .commit-hash {
+    background: rgba(110, 168, 254, 0.2);
+    color: #9ec5fe;
+}
+
+[data-bs-theme="dark"] .file-item {
+    color: #cbd5e1;
+}
+
+[data-bs-theme="dark"] .commit-separator {
+    border-top-color: rgba(110, 168, 254, 0.3);
+}
+
+[data-bs-theme="dark"] .commit-info a {
+    color: #6ea8fe;
+}
+
+[data-bs-theme="dark"] .commit-info a:hover {
+    color: #9ec5fe;
+}
+
 
