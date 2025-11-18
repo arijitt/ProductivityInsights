@@ -111,7 +111,7 @@
             <label for="organizationSelect" class="form-label">Organization Name</label>
             <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
                 <option value="msdata">msdata</option>
-                <option value="powerbi">powerbi</option>
+                <!--<option value="powerbi">powerbi</option>-->
             </select>
         </div>
 
@@ -121,11 +121,11 @@
                 @if (selectedOrganization == "msdata")
                 {
                     <option value="A365">A365</option>
-                    <option value="HDInsight">HDInsight</option>
+                    <!--<option value="HDInsight">HDInsight</option>-->
                 }
                 else if (selectedOrganization == "powerbi")
                 {
-                    <option value="MWC">MWC</option>
+                    <!--<option value="MWC">MWC</option>-->
                 }
             </select>
         </div>
@@ -134,7 +134,7 @@
         {
             <div class="mb-4">
                 <label for="teamSelect" class="form-label">Team Name</label>
-                <select id="teamSelect" class="form-select" @bind="selectedTeam">
+                <select id="teamSelect" class="form-select" @onchange="OnTeamChanged" value="@selectedTeam">
                     <option value="Cosmos on Azure Job Service">Cosmos on Azure Job Service</option>
                     <option value="FastSpark">FastSpark</option>
                     <option value="JS Reliability">JS Reliability</option>
@@ -147,11 +147,11 @@
         <div class="mb-4">
             <label for="areaPathSelect" class="form-label">Area Path</label>
             <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
-                <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
-                <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
-                <option value="A365\FastSpark">A365\FastSpark</option>
-                <option value="A365\JS Reliability">A365\JS Reliability</option>
-                <option value="A365\Job Service V2">A365\Job Service V2</option>
+                <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure" disabled="@(!IsAreaPathApplicable("A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure"))">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
+                <option value="A365\FastSpark" disabled="@(!IsAreaPathApplicable("A365\\FastSpark"))">A365\FastSpark</option>
+                <option value="A365\JS Reliability" disabled="@(!IsAreaPathApplicable("A365\\JS Reliability"))">A365\JS Reliability</option>
+                <option value="A365\Job Service V2" disabled="@(!IsAreaPathApplicable("A365\\Job Service V2"))">A365\Job Service V2</option>
+                <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities" disabled="@(!IsAreaPathApplicable("A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"))">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
             </select>
         </div>
 
@@ -203,7 +203,7 @@
         </div>
 
         <div class="mb-4">
-            <label for="gitRepositorySelect" class="form-label">Git Repositories</label>
+            <label for="gitRepositorySelect" class="form-label">Git Repository</label>
             <select id="gitRepositorySelect" class="form-select" @onchange="OnGitRepositoryChanged" value="@selectedGitRepository">
                 @if (selectedProject == "MWC")
                 {
@@ -313,6 +313,12 @@
         selectedOption = option;
     }
 
+    private void OnTeamChanged(ChangeEventArgs e)
+    {
+        selectedTeam = e.Value?.ToString() ?? "Cosmos on Azure Job Service";
+        selectedAreaPath = GetAreaPathForTeam();
+    }
+
     private void OnOrganizationChanged(ChangeEventArgs e)
     {
         selectedOrganization = e.Value?.ToString() ?? "msdata";
@@ -321,11 +327,13 @@
         {
             selectedTeam = "Cosmos on Azure Job Service";
             selectedGitRepository = "BBC-VHD";
+            selectedAreaPath = GetAreaPathForTeam();
         }
         else if (selectedProject == "MWC")
         {
             selectedGitRepository = "workload-sparkcore";
         }
+        selectedTargetBranch = GetTargetBranch();
     }
 
     private void OnProjectChanged(ChangeEventArgs e)
@@ -389,6 +397,24 @@
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
                                         "BBC-VHD", "BBC-Probes", "marlin" };
         return masterBranchRepos.Contains(selectedGitRepository);
+    }
+
+    private string GetAreaPathForTeam()
+    {
+        return selectedTeam switch
+        {
+            "Cosmos on Azure Job Service" => "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure",
+            "FastSpark" => "A365\\FastSpark",
+            "JS Reliability" => "A365\\JS Reliability",
+            "Job Service V2" => "A365\\Job Service V2",
+            "Lakehouse Job Execution and Capacities" => "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities",
+            _ => "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"
+        };
+    }
+
+    private bool IsAreaPathApplicable(string areaPath)
+    {
+        return GetAreaPathForTeam() == areaPath;
     }
 
     private async Task ProcessAnalysis()
@@ -906,7 +932,7 @@
     private string selectedProject = "A365";
     private string selectedOption = "workItems";
     private string selectedTeam = "Cosmos on Azure Job Service";
-    private string selectedAreaPath = "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities";
+    private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
     private string selectedGitRepository = "BBC-VHD";
     private string selectedTargetBranch = "master";
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\CorePlatform";
