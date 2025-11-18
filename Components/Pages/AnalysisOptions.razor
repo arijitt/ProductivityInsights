@@ -507,6 +507,7 @@
     {
         analysisResultHtml = string.Empty;
         expandedRows.Clear();
+        contributorDetails.Clear();
     }
 
     private async Task ConfirmAnalysis()
@@ -615,7 +616,19 @@
                             <tr class="details-row">
                                 <td colspan="3">
                                     <div class="commit-details">
-                                        @((MarkupString)GetContributionDetails(contributor.Name))
+                                        @if (contributorDetails.ContainsKey(contributor.Name))
+                                        {
+                                            @((MarkupString)contributorDetails[contributor.Name])
+                                        }
+                                        else
+                                        {
+                                            <div class="text-center py-3">
+                                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                                <div class="mt-2">Loading commit details...</div>
+                                            </div>
+                                        }
                                     </div>
                                 </td>
                             </tr>
@@ -627,7 +640,7 @@
         </div>
     };
 
-    private void ToggleRow(string contributorName)
+    private async Task ToggleRow(string contributorName)
     {
         if (expandedRows.Contains(contributorName))
         {
@@ -636,6 +649,15 @@
         else
         {
             expandedRows.Add(contributorName);
+            
+            // Load details if not already loaded
+            if (!contributorDetails.ContainsKey(contributorName))
+            {
+                StateHasChanged(); // Show loading state
+                var details = await GetContributionDetails(contributorName);
+                contributorDetails[contributorName] = details;
+                StateHasChanged(); // Show loaded details
+            }
         }
     }
 
@@ -678,7 +700,138 @@
         return commitStatistics;
     }
 
-    private string GetContributionDetails(string contributorName)
+    private async Task<string> GetContributionDetails(string contributorName)
+    {
+        if (commitCollection?.value == null || !commitCollection.value.Any())
+        {
+            return "<div class='commit-entry'><div class='commit-info'><em>No commits found.</em></div></div>";
+        }
+
+        var contributorCommits = this.commitCollection.value
+           .Where(c => (c.committer?.name ?? c.author?.name ?? "Unknown") == contributorName)
+           .OrderByDescending(c => c.committer?.date ?? c.author?.date ?? DateTime.MinValue)
+           .ToList();
+
+        if (!contributorCommits.Any())
+        {
+            return $"<div class='commit-entry'><div class='commit-info'><em>No commits found for {contributorName}.</em></div></div>";
+        }
+
+        CommitCollection? contributorCommitCollection = new CommitCollection()
+        {
+            count = contributorCommits.Count,
+            value = contributorCommits
+        };
+
+        CommitQueryOptions commitQueryOptions = GetCommitQueryOptions();
+
+        GitCommitCollection? gitCommitCollection = await GitCommitMetrics.GetCommitDetailsAsync(
+            commitQueryOptions.OrganizationName,
+            commitQueryOptions.ProjectName,
+            commitQueryOptions.GitRepositoryName,
+            commitQueryOptions.TargetBranchName,
+            contributorCommitCollection);
+
+        if (gitCommitCollection?.Value == null || !gitCommitCollection.Value.Any())
+        {
+            return $"<div class='commit-entry'><div class='commit-info'><em>No detailed commit information available for {contributorName}.</em></div></div>";
+        }
+
+        var details = new System.Text.StringBuilder();
+
+        // Calculate totals for contributor
+        var totalAddedLines = gitCommitCollection.Value.Sum(c => c.AddedLines);
+        var totalDeletedLines = gitCommitCollection.Value.Sum(c => c.DeletedLines);
+        var totalFilesChanged = gitCommitCollection.Value.Sum(c => c.ChangedFilesCommitTypes.Count);
+        var totalCommits = gitCommitCollection.Value.Count;
+
+        // Add contributor summary header
+        details.Append("<div class='contributor-summary mb-3 p-3' style='background-color: var(--bs-secondary-bg); border-left: 4px solid var(--bs-primary); border-radius: 4px;'>")
+               .Append($"<h6 class='fw-bold mb-2'>📊 Summary for {contributorName}</h6>")
+               .Append($"<div><strong>Total Commits:</strong> {totalCommits}</div>")
+               .Append($"<div><strong>Total Lines Added:</strong> <span class='text-success'>+{totalAddedLines}</span></div>")
+               .Append($"<div><strong>Total Lines Deleted:</strong> <span class='text-danger'>-{totalDeletedLines}</span></div>")
+               .Append($"<div><strong>Total Files Changed:</strong> {totalFilesChanged}</div>")
+               .Append("</div>");
+
+        foreach (var gitCommit in gitCommitCollection.Value)
+        {
+            var commitDate = gitCommit.CommitterDate;
+            var authorName = gitCommit.AuthorName ?? "Unknown";
+            var authorEmail = gitCommit.AuthorEmail ?? "";
+            var committerName = gitCommit.CommitterName ?? "Unknown";
+            var committerEmail = gitCommit.CommitterEmail ?? "";
+            var commitMessage = gitCommit.Comment ?? "No message";
+            var commitIdShort = gitCommit.CommitId?.Substring(0, Math.Min(8, gitCommit.CommitId.Length)) ?? "Unknown";
+            
+            var addedLines = gitCommit.AddedLines;
+            var deletedLines = gitCommit.DeletedLines;
+            var filesChanged = gitCommit.ChangedFilesCommitTypes.Count;
+
+            details.Append("<div class='commit-entry'>")
+                   .Append($"<div class='commit-header'>🔄 Commit: <span class='commit-hash'>{commitIdShort}...</span></div>")
+                   .Append($"<div class='commit-info'><strong>Author:</strong> {authorName}");
+            
+            if (!string.IsNullOrEmpty(authorEmail))
+            {
+                details.Append($" &lt;{authorEmail}&gt;");
+            }
+            
+            details.Append($"<div class='commit-info'><strong>Committer:</strong> {committerName}");
+
+            if (!string.IsNullOrEmpty(committerEmail))
+            {
+                details.Append($" &lt;{committerEmail}&gt;");
+            }
+
+            details.Append("</div>")
+                   .Append($"<div class='commit-info'><strong>Date:</strong> {commitDate:yyyy-MM-dd HH:mm:ss}</div>")
+                   .Append($"<div class='commit-info'><strong>Message:</strong> {System.Web.HttpUtility.HtmlEncode(commitMessage)}</div>")
+                   .Append($"<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+{addedLines} additions</span>, <span class='text-danger'>-{deletedLines} deletions</span></div>")
+                   .Append($"<div class='commit-info'><strong>📁 Files Changed:</strong> {filesChanged}</div>");
+
+            // Show changed files details
+            if (gitCommit.ChangedFilesCommitTypes.Any())
+            {
+                details.Append("<div class='commit-files'><strong>Changed Files:</strong>");
+                foreach (var file in gitCommit.ChangedFilesCommitTypes.Take(10)) // Limit to first 10 files
+                {
+                    var filePath = file.Key;
+                    var changeType = file.Value;
+                    
+                    // Get per-file line counts
+                    gitCommit.ChangedFilesAddedLineCounts.TryGetValue(filePath, out var fileAdded);
+                    gitCommit.ChangedFilesDeletedLineCounts.TryGetValue(filePath, out var fileDeleted);
+                    
+                    details.Append($"<div class='file-item'>📄 {System.Web.HttpUtility.HtmlEncode(filePath)} [{changeType}] (+{fileAdded}/-{fileDeleted})</div>");
+                }
+                
+                if (gitCommit.ChangedFilesCommitTypes.Count > 10)
+                {
+                    details.Append($"<div class='file-item'><em>... and {gitCommit.ChangedFilesCommitTypes.Count - 10} more files</em></div>");
+                }
+                
+                details.Append("</div>");
+            }
+
+            if (!string.IsNullOrEmpty(gitCommit.RemoteUrl))
+            {
+                details.Append($"<div class='commit-info'>🌐 <strong>URL:</strong> <a href='{gitCommit.RemoteUrl}' target='_blank'>View Commit</a></div>");
+            }
+
+            details.Append("</div>");
+            
+            // Add separator between commits except for the last one
+            if (gitCommit != gitCommitCollection.Value.Last())
+            {
+                details.Append("<hr class='commit-separator'/>");
+            }
+        }
+
+        return details.ToString();
+    }
+
+    private string GetContributionOverview(string contributorName)
     {
         if (commitCollection?.value == null || !commitCollection.value.Any())
         {
@@ -741,55 +894,6 @@
         return details.ToString();
     }
 
-    /*
-    private string GetCommitDetails(string contributorName)
-    {
-        // Sample commit details - replace with actual data
-        var details = new System.Text.StringBuilder();
-        
-        if (contributorName == "Ravikiran Tangirala")
-        {
-            details.Append("<div class='commit-entry'>")
-                   .Append("<div class='commit-header'>🔄 Commit: <span class='commit-hash'>3ed2ce32...</span></div>")
-                   .Append("<div class='commit-info'><strong>Author:</strong> Ravikiran Tangirala &lt;Ravikiran.Tangirala@microsoft.com&gt;</div>")
-                   .Append("<div class='commit-info'><strong>Date:</strong> 2025-10-07 18:30:54</div>")
-                   .Append("<div class='commit-info'><strong>Message:</strong> Merged PR 1827477: TS proxy - Purview regex update</div>")
-                   .Append("<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+5 additions</span>, <span class='text-danger'>-5 deletions</span></div>")
-                   .Append("<div class='commit-files'><strong>📁 Changed Files (3):</strong>")
-                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-prod-eastus2euap.json [edit] (+2/-2)</div>")
-                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services2-prod-eastus2euap.json [edit] (+2/-2)</div>")
-                   .Append("<div class='file-item'>📄 /TokenService/Microsoft.Marlin.TokenService.UnitTests/Proxy/ActualEndpointsRegexTests.cs [edit] (+1/-1)</div>")
-                   .Append("</div>")
-                   .Append("<div class='commit-info'>🔗 <strong>Parents:</strong> 5b549dda...</div>")
-                   .Append("<div class='commit-info'>🌐 <strong>URL:</strong> <a href='https://dev.azure.com/msdata/A365/_git/Marlin/commit/3ed2ce32ab6931606fd67d8de3abfb0e5b573fb9' target='_blank'>View Commit</a></div>")
-                   .Append("</div>")
-                   .Append("<hr class='commit-separator'/>")
-                   .Append("<div class='commit-entry'>")
-                   .Append("<div class='commit-header'>🔄 Commit: <span class='commit-hash'>9d53f8d0...</span></div>")
-                   .Append("<div class='commit-info'><strong>Author:</strong> Ravikiran Tangirala &lt;Ravikiran.Tangirala@microsoft.com&gt;</div>")
-                   .Append("<div class='commit-info'><strong>Date:</strong> 2025-10-08 14:34:16</div>")
-                   .Append("<div class='commit-info'><strong>Message:</strong> Merged PR 1828511: Remove EH proxy regex</div>")
-                   .Append("<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+6 additions</span>, <span class='text-danger'>-6 deletions</span></div>")
-                   .Append("<div class='commit-files'><strong>📁 Changed Files (3):</strong>")
-                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-prod-eastus2euap.json [edit] (+2/-2)</div>")
-                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services1-triprod-eastus2euap.json [edit] (+2/-2)</div>")
-                   .Append("<div class='file-item'>📄 /Configurations/TokenService/appsettings.common-services2-prod-eastus2euap.json [edit] (+2/-2)</div>")
-                   .Append("</div>")
-                   .Append("<div class='commit-info'>🔗 <strong>Parents:</strong> f519503a...</div>")
-                   .Append("<div class='commit-info'>🌐 <strong>URL:</strong> <a href='https://dev.azure.com/msdata/A365/_git/Marlin/commit/9d53f8d0ed5f29a76da82aa0e808fe3f06c27479' target='_blank'>View Commit</a></div>")
-                   .Append("</div>");
-        }
-        else
-        {
-            details.Append("<div class='commit-entry'>")
-                   .Append($"<div class='commit-info'><em>Detailed commit information for {contributorName} will be loaded here...</em></div>")
-                   .Append("</div>");
-        }
-        
-        return details.ToString();
-    }
-    */
-
     private string BuildGitCommitsSummaryHtml()
     {
         // This method is no longer used for gitCommits but kept for compatibility
@@ -815,4 +919,5 @@
     private HashSet<string> expandedRows = new HashSet<string>();
     private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
     private bool isLoadingResults = false;
+    private Dictionary<string, string> contributorDetails = new Dictionary<string, string>();
 }

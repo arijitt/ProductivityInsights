@@ -1,4 +1,5 @@
 ﻿using Azure.Core;
+using Microsoft.Extensions.Options;
 using ProductivityInsights.Models;
 using ProductivityInsights.Utilities;
 using System.Net.Http.Headers;
@@ -8,64 +9,6 @@ namespace ProductivityInsights.Metrics
 {
     public class GitCommitMetrics
     {
-        /// <summary>
-        /// Retrieves details for a specified Azure DevOps Git repository using the provided command-line options.
-        /// </summary>
-        /// <remarks>This method connects to the Azure DevOps REST API using the current user's access
-        /// token. If the repository cannot be found or an error occurs during the request, the method returns <see
-        /// langword="null"/>. The caller should check the result for <see langword="null"/> before accessing repository
-        /// details.</remarks>
-        /// <param name="options">The command-line options containing the organization name, project name, and repository identifier used to
-        /// locate the Git repository. Cannot be null.</param>
-        /// <returns>A task that represents the asynchronous operation. The task result contains a <see cref="GitRepository"/>
-        /// object with repository details if the repository is found; otherwise, <see langword="null"/>.</returns>
-        public static async Task<GitRepository?> GetRepositoryDetailsAsync(string organizationName, string projectName, string gitRepositoryName)
-        {
-            try
-            {
-                // Get the access token
-                AccessToken accessToken = await UserToken.GetToken();
-
-                using var httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-
-                // Get repository information
-                string repositoryUrl = $"https://dev.azure.com/{organizationName}/{projectName}/_apis/git/repositories/{gitRepositoryName}?api-version=7.0";
-
-#if DEBUG
-                Console.WriteLine($"🔗 Connecting to Git repository '{gitRepositoryName}' in project '{projectName}'...");
-#endif
-
-                var httpResponse = await httpClient.GetAsync(repositoryUrl);
-
-#if DEBUG
-                Console.WriteLine($"Git Repository API Response Status: {httpResponse.StatusCode}");
-#endif
-
-                if (!httpResponse.IsSuccessStatusCode)
-                {
-                    Console.WriteLine($"❌ Error connecting to repository: {httpResponse.StatusCode}");
-                    string errorContent = await httpResponse.Content.ReadAsStringAsync();
-                    return null;
-                }
-
-                string responseContent = await httpResponse.Content.ReadAsStringAsync();
-
-                GitRepository? gitRepositoryDetails = JsonSerializer.Deserialize<GitRepository>(responseContent);
-
-#if DEBUG
-                Console.WriteLine($"✓ Successfully connected to repository: {gitRepositoryDetails?.name}");
-#endif
-
-                return gitRepositoryDetails;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Error connecting to Git repository: {ex.Message}");
-                return null;
-            }
-        }
-
         /// <summary>
         /// Retrieves a collection of commits that were merged into the specified branch within the given date range
         /// from an Azure DevOps Git repository.
@@ -89,7 +32,7 @@ namespace ProductivityInsights.Metrics
         public static async Task<CommitCollection?> GetCommitsAsync(
             string organizationName,
             string projectName,
-            string gitRepository,
+            string gitRepositoryName,
             string branchName,
             DateTime fromDate,
             DateTime toDate)
@@ -106,7 +49,7 @@ namespace ProductivityInsights.Metrics
                 string toDateString = toDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
                 // Base URL without paging parameters
-                string baseCommitsUrl = $"https://dev.azure.com/{organizationName}/{projectName}/_apis/git/repositories/{gitRepository}/commits" +
+                string baseCommitsUrl = $"https://dev.azure.com/{organizationName}/{projectName}/_apis/git/repositories/{gitRepositoryName}/commits" +
                                        $"?searchCriteria.itemVersion.version={branchName}" +
                                        "&searchCriteria.itemVersion.versionType=branch" +
                                        $"&searchCriteria.fromDate={fromDateString}" +
@@ -186,7 +129,116 @@ namespace ProductivityInsights.Metrics
             }
         }
 
+        public static async Task<GitCommitCollection?> GetCommitDetailsAsync(
+            string? organizationName,
+            string? projectName,
+            string? gitRepositoryName,
+            string? branchName,
+            CommitCollection? commitCollection)
+        {
+            Dictionary<string, CommitDetailsCollection>? commitDetailsCollectionMap = new Dictionary<string, CommitDetailsCollection>();
 
+            Dictionary<string, CommitChangeCollection>? commitChangeDetailsCollectionMap = new Dictionary<string, CommitChangeCollection>();
+
+            GitCommitCollection? gitCommitCollection = null;
+
+            if (commitCollection != null)
+            {
+                AccessToken accessToken = await UserToken.GetToken();
+
+                GitRepository? gitRepository = await GetRepositoryDetailsAsync(
+                    accessToken,
+                    organizationName,
+                    projectName,
+                    gitRepositoryName);
+
+                commitDetailsCollectionMap = await GitCommitMetrics.GetCommitDetailsAsync(
+                   accessToken,
+                   organizationName!,
+                   gitRepository!,
+                   branchName!,
+                   commitCollection);
+
+                commitChangeDetailsCollectionMap = await GitCommitMetrics.GetCommitChangeDetailsAsync(
+                    accessToken,
+                    organizationName!,
+                    gitRepository!,
+                    branchName!,
+                    commitCollection);
+
+                gitCommitCollection = await GitCommitMetrics.GetCommitLineChangeDetailsAsyc(
+                    accessToken,
+                    organizationName!,
+                    gitRepository!,
+                    branchName!,
+                    commitCollection,
+                    commitDetailsCollectionMap,
+                    commitChangeDetailsCollectionMap);
+            }
+
+            return gitCommitCollection;
+        }
+
+
+        /// <summary>
+        /// Retrieves details for a specified Azure DevOps Git repository asynchronously.
+        /// </summary>
+        /// <remarks>This method sends an authenticated HTTP request to the Azure DevOps REST API to
+        /// retrieve repository information. Returns null if the repository is not found or if an error occurs during
+        /// the request.</remarks>
+        /// <param name="accessToken">The access token used to authenticate the request to the Azure DevOps REST API. Cannot be null.</param>
+        /// <param name="organizationName">The name of the Azure DevOps organization containing the repository. Cannot be null or empty.</param>
+        /// <param name="projectName">The name of the Azure DevOps project containing the repository. Cannot be null or empty.</param>
+        /// <param name="gitRepositoryName">The name of the Git repository to retrieve. Cannot be null or empty.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains a GitRepository object with
+        /// repository details if found; otherwise, null if the repository does not exist or the request fails.</returns>
+        private static async Task<GitRepository?> GetRepositoryDetailsAsync(
+            AccessToken accessToken,
+            string? organizationName,
+            string? projectName,
+            string? gitRepositoryName)
+        {
+            try
+            {
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+
+                // Get repository information
+                string repositoryUrl = $"https://dev.azure.com/{organizationName}/{projectName}/_apis/git/repositories/{gitRepositoryName}?api-version=7.0";
+
+#if DEBUG
+                Console.WriteLine($"🔗 Connecting to Git repository '{gitRepositoryName}' in project '{projectName}'...");
+#endif
+
+                var httpResponse = await httpClient.GetAsync(repositoryUrl);
+
+#if DEBUG
+                Console.WriteLine($"Git Repository API Response Status: {httpResponse.StatusCode}");
+#endif
+
+                if (!httpResponse.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"❌ Error connecting to repository: {httpResponse.StatusCode}");
+                    string errorContent = await httpResponse.Content.ReadAsStringAsync();
+                    return null;
+                }
+
+                string responseContent = await httpResponse.Content.ReadAsStringAsync();
+
+                GitRepository? gitRepositoryDetails = JsonSerializer.Deserialize<GitRepository>(responseContent);
+
+#if DEBUG
+                Console.WriteLine($"✓ Successfully connected to repository: {gitRepositoryDetails?.name}");
+#endif
+
+                return gitRepositoryDetails;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error connecting to Git repository: {ex.Message}");
+                return null;
+            }
+        }
 
         /// <summary>
         /// Retrieves detailed information for each commit in the specified collection from an Azure DevOps Git
@@ -272,7 +324,6 @@ namespace ProductivityInsights.Metrics
 
             return commitDetailsMap;
         }
-
 
         /// <summary>
         /// Retrieves detailed change information for each commit in the specified collection from an Azure DevOps Git
@@ -383,7 +434,7 @@ namespace ProductivityInsights.Metrics
         /// the collection.</param>
         /// <returns>A list of GitCommit objects containing detailed line change information for each processed commit. The list
         /// is empty if no commits are provided or if none can be processed.</returns>
-        private static async Task<List<GitCommit>> GetCommitLineChangeDetailsAsyc(
+        private static async Task<GitCommitCollection> GetCommitLineChangeDetailsAsyc(
             AccessToken accessToken,
             string organizationName,
             GitRepository gitRepository,
@@ -394,7 +445,7 @@ namespace ProductivityInsights.Metrics
         {
             Dictionary<string, Dictionary<LineCountTypes, int>> commitLineChangeDetailsMap = new Dictionary<string, Dictionary<LineCountTypes, int>>();
 
-            List<GitCommit> gitCommitCollection = new List<GitCommit>();
+            GitCommitCollection gitCommitCollection = new GitCommitCollection();
 
             if (commitCollection == null || commitCollection.value == null)
             {
@@ -537,7 +588,7 @@ namespace ProductivityInsights.Metrics
                         commitLineChangeDetails!,
                         commitLineChangeDetailsMap!);
 
-                    gitCommitCollection.Add(gitCommit);
+                    gitCommitCollection.Value.Add(gitCommit);
 
 #if DEBUG
                     PrintUtilities.PrintSingleDashSeparator();
@@ -855,7 +906,9 @@ namespace ProductivityInsights.Metrics
                 gitCommit.DeletedLines += fileLinesDeleted;
             }
 
+#if DEBUG
             Console.WriteLine($"     📊 Commit {gitCommit.CommitId?[..8]} found with +{gitCommit.AddedLines}/-{gitCommit.DeletedLines} lines");
+#endif
 
             return gitCommit;
         }
