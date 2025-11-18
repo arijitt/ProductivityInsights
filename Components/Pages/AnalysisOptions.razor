@@ -725,7 +725,7 @@
 
         CommitQueryOptions commitQueryOptions = GetCommitQueryOptions();
 
-        GitCommitCollection? gitCommitCollection = await GitCommitMetrics.GetCommitDetailsAsync(
+        GitCommitCollection? gitCommitCollection = await GitCommitMetrics.GetCommitLineDetailsAsync(
             commitQueryOptions.OrganizationName,
             commitQueryOptions.ProjectName,
             commitQueryOptions.GitRepositoryName,

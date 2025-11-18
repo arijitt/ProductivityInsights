@@ -129,7 +129,7 @@ namespace ProductivityInsights.Metrics
             }
         }
 
-        public static async Task<GitCommitCollection?> GetCommitDetailsAsync(
+        public static async Task<GitCommitCollection?> GetCommitLineDetailsAsync(
             string? organizationName,
             string? projectName,
             string? gitRepositoryName,
