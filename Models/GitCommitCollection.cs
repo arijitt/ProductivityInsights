@@ -1,5 +1,7 @@
 ﻿namespace ProductivityInsights.Models
 {
+    using ProductivityInsights.Models.CommitChanges;
+
     public class GitCommit
     {
         public string? Organization { get; set; }

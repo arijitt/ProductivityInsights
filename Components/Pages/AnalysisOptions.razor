@@ -1,6 +1,9 @@
 @page "/"
 @using ProductivityInsights.Metrics
 @using ProductivityInsights.Models
+@using ProductivityInsights.Models.CommitChanges
+@using ProductivityInsights.Models.WorkItems
+@using ProductivityInsights.Models.WorkItems.HistoryCollection
 @using ProductivityInsights.Options
 @using ProductivityInsights.Utilities
 @rendermode InteractiveServer
@@ -68,6 +71,10 @@
             @if (selectedOption == "gitCommits")
             {
                 @RenderGitCommitsResults()
+            }
+            else if (selectedOption == "workItems")
+            {
+                @RenderWorkItemsResults()
             }
             else
             {
@@ -579,12 +586,131 @@
                 }
             });
         }
+        else if (selectedOption == "workItems")
+        {
+            isLoadingResults = true;
+            contributors = new List<(string Name, string Summary)>();
+            analysisResultHtml = "workItems"; // Flag to render RenderWorkItemsResults with loading state
+            StateHasChanged();
+            
+            // Scroll to bottom to show loading indicator
+            try
+            {
+                await Task.Delay(100);
+                await JSRuntime.InvokeVoidAsync("scrollToBottom", true);
+            }
+            catch { /* Ignore scroll errors */ }
+
+            // Run the API call in background
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var results = await GetWorkItemCollection();
+                    await InvokeAsync(() =>
+                    {
+                        contributors = results;
+                        isLoadingResults = false;
+                        StateHasChanged();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error loading work items: {ex.Message}");
+                    await InvokeAsync(() =>
+                    {
+                        isLoadingResults = false;
+                        StateHasChanged();
+                    });
+                }
+            });
+        }
         else
         {
             analysisResultHtml = string.Empty;
             StateHasChanged();
         }
     }
+
+    private RenderFragment RenderWorkItemsResults() => __builder =>
+    {
+        
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th colspan="3" class="text-center fw-bold table-title-header">
+                            Work Items Completion Summary for '@selectedOrganization\@selectedProject\@selectedAreaPath'
+                        </th>
+                    </tr>
+                    <tr>
+                        <th scope="col">Contributor</th>
+                        <th scope="col">Summary</th>
+                        <th scope="col" style="width: 50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (isLoadingResults)
+                    {
+                        <tr>
+                            <td colspan="3" class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div class="mt-3 fw-semibold">Loading work item data...</div>
+                            </td>
+                        </tr>
+                    }
+                    else if (!contributors.Any())
+                    {
+                        <tr>
+                            <td colspan="3" class="text-center py-4 text-muted">
+                                No work items found for the selected criteria.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var contributor in contributors)
+                        {
+                            var isExpanded = expandedRows.Contains(contributor.Name);
+                            <tr class="contributor-row">
+                                <td class="fw-normal">@contributor.Name</td>
+                                <td>@contributor.Summary</td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-link expand-btn" @onclick="() => ToggleRow(contributor.Name)">
+                                        <span class="@(isExpanded ? "expanded" : "")">@(isExpanded ? "−" : "+")</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            @if (isExpanded)
+                            {
+                                <tr class="details-row">
+                                    <td colspan="3">
+                                        <div class="commit-details">
+                                            @if (contributorDetails.ContainsKey(contributor.Name))
+                                            {
+                                                @((MarkupString)contributorDetails[contributor.Name])
+                                            }
+                                            else
+                                            {
+                                                <div class="text-center py-3">
+                                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                        <span class="visually-hidden">Loading...</span>
+                                                    </div>
+                                                    <div class="mt-2">Loading work item details...</div>
+                                                </div>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    };
 
     private RenderFragment RenderGitCommitsResults() => __builder =>
     {
@@ -680,11 +806,358 @@
             if (!contributorDetails.ContainsKey(contributorName))
             {
                 StateHasChanged(); // Show loading state
-                var details = await GetContributionDetails(contributorName);
+                
+                string details;
+                if (selectedOption == "workItems")
+                {
+                    details = await GetWorkContributionDetails(contributorName);
+                }
+                else // gitCommits
+                {
+                    details = await GetCodeContributionDetails(contributorName);
+                }
+                
                 contributorDetails[contributorName] = details;
                 StateHasChanged(); // Show loaded details
             }
         }
+    }
+
+    private async Task<string> GetWorkContributionDetails(string contributorName)
+    {
+        if (workItemDetailsCollection?.value == null || !workItemDetailsCollection.value.Any())
+        {
+            return "<div class='work-item-entry'><div class='work-item-info'><em>No work items found.</em></div></div>";
+        }
+
+        var contributorWorkItems = this.workItemDetailsCollection.value
+           .Where(w => (w.fields?.SystemAssignedTo?.displayName ?? "Unassigned") == contributorName)
+           .OrderByDescending(w => w.fields?.MicrosoftVSTSCommonClosedDate ?? w.fields?.SystemChangedDate ?? DateTime.MinValue)
+           .ToList();
+
+        if (!contributorWorkItems.Any())
+        {
+            return $"<div class='work-item-entry'><div class='work-item-info'><em>No work items found for {contributorName}.</em></div></div>";
+        }
+
+        WorkItemQueryOptions workItemQueryOptions = GetWorkItemQueryOptions();
+
+        Dictionary<int, WorkItemHistoryCollection> workItemHistoryCollectionMap =  await WorkItemCompletionMetrics.GetWorkItemHistoryCollectionAsync(
+            workItemQueryOptions.OrganizationName,
+            new WorkItemDetailsCollection() { count = contributorWorkItems.Count, value = contributorWorkItems});
+
+        var details = new System.Text.StringBuilder();
+
+        // Calculate totals for contributor
+        var totalWorkItems = contributorWorkItems.Count;
+        var workItemsByType = contributorWorkItems
+            .GroupBy(w => w.fields?.SystemWorkItemType ?? "Unknown")
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Collect days in active work states for all work items
+        var daysInActiveWorkStates = new List<double>();
+        
+        foreach (var workItem in contributorWorkItems)
+        {
+            var workItemId = workItem.fields?.SystemId ?? 0;
+            if (workItemHistoryCollectionMap.TryGetValue(workItemId, out var historyCollection) &&
+                historyCollection?.value != null && historyCollection.value.Count > 1)
+            {
+                // Build state periods for this work item
+                var statePeriods = new List<(string State, DateTime EntryDate, DateTime? ExitDate)>();
+                
+                string? currentTrackedState = null;
+                DateTime currentStateEntryDate = DateTime.MinValue;
+
+                for (int i = 0; i < historyCollection.value.Count; i++)
+                {
+                    var revision = historyCollection.value[i];
+                    var revisionState = revision.fields?.SystemState;
+                    var revisionDate = revision.fields?.SystemChangedDate ?? DateTime.Now;
+
+                    if (i == 0)
+                    {
+                        currentTrackedState = revisionState;
+                        currentStateEntryDate = revisionDate;
+                    }
+                    else if (revisionState != currentTrackedState)
+                    {
+                        if (currentTrackedState != null)
+                        {
+                            statePeriods.Add((currentTrackedState, currentStateEntryDate, revisionDate));
+                        }
+                        currentTrackedState = revisionState;
+                        currentStateEntryDate = revisionDate;
+                    }
+                }
+
+                if (currentTrackedState != null)
+                {
+                    statePeriods.Add((currentTrackedState, currentStateEntryDate, null));
+                }
+
+                // Calculate total time in active work states for this work item
+                double totalDaysInActiveStates = 0;
+                foreach (var period in statePeriods)
+                {
+                    if (period.State.Equals("Committed", StringComparison.OrdinalIgnoreCase) ||
+                        period.State.Equals("Active", StringComparison.OrdinalIgnoreCase) ||
+                        period.State.Equals("In Progress", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var exitDate = period.ExitDate ?? DateTime.Now;
+                        var duration = exitDate - period.EntryDate;
+                        totalDaysInActiveStates += duration.TotalDays;
+                    }
+                }
+
+                if (totalDaysInActiveStates > 0)
+                {
+                    daysInActiveWorkStates.Add(totalDaysInActiveStates);
+                }
+            }
+        }
+
+        // Add contributor summary header
+        details.Append("<div class='contributor-summary mb-3 p-3' style='background-color: var(--bs-secondary-bg); border-left: 4px solid var(--bs-primary); border-radius: 4px;'>")
+               .Append($"<h6 class='fw-bold mb-2'>📊 Summary for {contributorName}</h6>")
+               .Append($"<div><strong>Total Work Items Completed:</strong> {totalWorkItems}</div>");
+        
+        foreach (var typeGroup in workItemsByType.OrderByDescending(kvp => kvp.Value))
+        {
+            details.Append($"<div><strong>{typeGroup.Key}:</strong> {typeGroup.Value}</div>");
+        }
+
+        // Add time analysis statistics
+        if (daysInActiveWorkStates.Any())
+        {
+            var totalDays = daysInActiveWorkStates.Sum();
+            var maxDays = daysInActiveWorkStates.Max();
+            var minDays = daysInActiveWorkStates.Min();
+            var averageDays = daysInActiveWorkStates.Average();
+            var sortedDays = daysInActiveWorkStates.OrderBy(d => d).ToList();
+            var medianDays = sortedDays.Count % 2 == 0
+                ? (sortedDays[sortedDays.Count / 2 - 1] + sortedDays[sortedDays.Count / 2]) / 2
+                : sortedDays[sortedDays.Count / 2];
+
+            details.Append("<div class='mt-2'><strong>⏱️ Time Analysis (Committed/Active/In Progress states only):</strong></div>")
+                   .Append($"<div style='margin-left: 20px;'>")
+                   .Append($"<div>Total Days: {totalDays:F1}</div>")
+                   .Append($"<div>Maximum Days: {maxDays:F1}</div>")
+                   .Append($"<div>Minimum Days: {minDays:F1}</div>")
+                   .Append($"<div>Average Days: {averageDays:F1}</div>")
+                   .Append($"<div>Median Days: {medianDays:F1}</div>")
+                   .Append($"<div>Work Items with Active Work Time: {daysInActiveWorkStates.Count} of {totalWorkItems}</div>")
+                   .Append("</div>");
+        }
+        else
+        {
+            details.Append("<div class='mt-2'><strong>⏱️ Time Analysis:</strong> No time spent in Committed/Active/In Progress states found for work items.</div>");
+        }
+        
+        details.Append("</div>");
+
+        // Add separator after summary
+        details.Append("<hr class='my-3' style='border-top: 2px solid var(--bs-primary); opacity: 0.3;'/>");
+
+        foreach (var workItem in contributorWorkItems)
+        {
+            var workItemId = workItem.fields?.SystemId ?? 0;
+            var title = workItem.fields?.SystemTitle ?? "No title";
+            var workItemType = workItem.fields?.SystemWorkItemType ?? "Unknown";
+            var state = workItem.fields?.SystemState ?? "Unknown";
+            var createdDate = workItem.fields?.SystemCreatedDate ?? DateTime.MinValue;
+            var closedDate = workItem.fields?.MicrosoftVSTSCommonClosedDate;
+            var changedDate = workItem.fields?.SystemChangedDate ?? DateTime.MinValue;
+            var priority = workItem.fields?.MicrosoftVSTSCommonPriority;
+            var areaPath = workItem.fields?.SystemAreaPath ?? "";
+            var iterationPath = workItem.fields?.SystemIterationPath ?? "";
+
+            details.Append("<div class='work-item-entry'>")
+                   .Append($"<div class='work-item-header'>📋 Work Item #{workItemId} - <span class='work-item-type'>{workItemType}</span></div>")
+                   .Append($"<div class='work-item-info'><strong>📝 Title:</strong> {System.Web.HttpUtility.HtmlEncode(title)}</div>")
+                   .Append($"<div class='work-item-info'><strong>🔄 State:</strong> <span class='badge bg-success'>{state}</span></div>");
+            
+            if (priority.HasValue)
+            {
+                details.Append($"<div class='work-item-info'><strong>⚡ Priority:</strong> {priority.Value}</div>");
+            }
+            
+            details.Append($"<div class='work-item-info'><strong>📅 Created Date:</strong> {createdDate:yyyy-MM-dd HH:mm:ss}</div>");
+            
+            if (closedDate.HasValue)
+            {
+                details.Append($"<div class='work-item-info'><strong>✅ Closed Date:</strong> {closedDate.Value:yyyy-MM-dd HH:mm:ss}</div>");
+                
+                // Calculate days to complete
+                var daysToComplete = (closedDate.Value - createdDate).TotalDays;
+                details.Append($"<div class='work-item-info'><strong>⏱️ Time to Complete:</strong> {daysToComplete:F1} days</div>");
+            }
+            else
+            {
+                details.Append($"<div class='work-item-info'><strong>🕒 Last Changed:</strong> {changedDate:yyyy-MM-dd HH:mm:ss}</div>");
+            }
+
+            if (!string.IsNullOrEmpty(areaPath))
+            {
+                details.Append($"<div class='work-item-info'><strong>📂 Area Path:</strong> {System.Web.HttpUtility.HtmlEncode(areaPath)}</div>");
+            }
+
+            if (!string.IsNullOrEmpty(iterationPath))
+            {
+                details.Append($"<div class='work-item-info'><strong>🔁 Iteration:</strong> {System.Web.HttpUtility.HtmlEncode(iterationPath)}</div>");
+            }
+
+            // Add work item history and state transitions
+            if (workItemHistoryCollectionMap.TryGetValue(workItemId, out var historyCollection) &&
+                historyCollection?.value != null && historyCollection.value.Count > 1)
+            {
+                // Build state periods: track when each state started and ended
+                var statePeriods = new List<(string State, DateTime EntryDate, DateTime? ExitDate, string EnteredBy)>();
+                
+                string? currentTrackedState = null;
+                DateTime currentStateEntryDate = DateTime.MinValue;
+                string currentStateEnteredBy = "Unknown";
+
+                for (int i = 0; i < historyCollection.value.Count; i++)
+                {
+                    var revision = historyCollection.value[i];
+                    var revisionState = revision.fields?.SystemState;
+                    var revisionDate = revision.fields?.SystemChangedDate ?? DateTime.Now;
+                    var changedBy = revision.fields?.SystemChangedBy?.displayName ?? "Unknown";
+
+                    if (i == 0)
+                    {
+                        // First revision - initialize state tracking
+                        currentTrackedState = revisionState;
+                        currentStateEntryDate = revisionDate;
+                        currentStateEnteredBy = changedBy;
+                    }
+                    else if (revisionState != currentTrackedState)
+                    {
+                        // State changed - close previous state period and start new one
+                        if (currentTrackedState != null)
+                        {
+                            statePeriods.Add((currentTrackedState, currentStateEntryDate, revisionDate, currentStateEnteredBy));
+                        }
+                        currentTrackedState = revisionState;
+                        currentStateEntryDate = revisionDate;
+                        currentStateEnteredBy = changedBy;
+                    }
+                }
+
+                // Close the final state period (still ongoing)
+                if (currentTrackedState != null)
+                {
+                    statePeriods.Add((currentTrackedState, currentStateEntryDate, null, currentStateEnteredBy));
+                }
+
+                // Calculate total time spent in each state
+                var stateDurations = new Dictionary<string, TimeSpan>();
+                
+                foreach (var period in statePeriods)
+                {
+                    var exitDate = period.ExitDate ?? DateTime.Now;
+                    var duration = exitDate - period.EntryDate;
+
+                    if (!stateDurations.ContainsKey(period.State))
+                        stateDurations[period.State] = TimeSpan.Zero;
+                    stateDurations[period.State] = stateDurations[period.State].Add(duration);
+                }
+
+                // Calculate time spent in active work states (Committed, Active, In Progress)
+                TimeSpan totalActiveWorkTime = TimeSpan.Zero;
+                foreach (var stateDuration in stateDurations)
+                {
+                    if (stateDuration.Key.Equals("Committed", StringComparison.OrdinalIgnoreCase) ||
+                        stateDuration.Key.Equals("Active", StringComparison.OrdinalIgnoreCase) ||
+                        stateDuration.Key.Equals("In Progress", StringComparison.OrdinalIgnoreCase))
+                    {
+                        totalActiveWorkTime = totalActiveWorkTime.Add(stateDuration.Value);
+                    }
+                }
+
+                if (totalActiveWorkTime.TotalDays > 0)
+                {
+                    details.Append($"<div class='work-item-info'><strong>⏱️ Time in Active Work:</strong> {totalActiveWorkTime.TotalDays:F1} days</div>");
+                }
+
+                // Show state change history
+                details.Append("<div class='work-item-info'><strong>📜 State Change History:</strong></div>");
+                details.Append("<div class='state-history' style='margin-left: 20px; font-size: 0.9em;'>");
+
+                for (int i = 0; i < statePeriods.Count; i++)
+                {
+                    var period = statePeriods[i];
+                    var exitDate = period.ExitDate ?? DateTime.Now;
+                    var duration = exitDate - period.EntryDate;
+                    var durationStr = FormatUtilities.ToStringValue(duration);
+                    
+                    if (period.ExitDate.HasValue && i + 1 < statePeriods.Count)
+                    {
+                        var nextPeriod = statePeriods[i + 1];
+                        details.Append($"<div>• {period.ExitDate.Value:yyyy-MM-dd HH:mm} - <strong>{nextPeriod.EnteredBy}</strong>: {period.State} → {nextPeriod.State} <em>(spent {durationStr} in '{period.State}')</em></div>");
+                    }
+                    else if (!period.ExitDate.HasValue)
+                    {
+                        details.Append($"<div>• Currently in <strong>{period.State}</strong> since {period.EntryDate:yyyy-MM-dd HH:mm} <em>({durationStr})</em></div>");
+                    }
+                }
+
+                details.Append("</div>");
+            }
+
+            // Add link to work item
+            if (workItem._links?.html?.href != null)
+            {
+                details.Append($"<div class='work-item-info'>🌐 <strong>URL:</strong> <a href='{workItem._links.html.href}' target='_blank'>View Work Item</a></div>");
+            }
+
+            details.Append("</div>");
+            
+            // Add separator between work items except for the last one
+            if (workItem != contributorWorkItems.Last())
+            {
+                details.Append("<hr class='work-item-separator'/>");
+            }
+        }
+
+        return details.ToString();
+    }
+
+    private async Task<List<(string Name, string Summary)>> GetWorkItemCollection()
+    {
+        WorkItemQueryOptions workItemQueryOptions = GetWorkItemQueryOptions();
+
+        this.workItemDetailsCollection = await WorkItemCompletionMetrics.QueryWorkItemDetailsAsync(
+            organizationName: workItemQueryOptions.OrganizationName,
+            projectName: workItemQueryOptions.ProjectName,
+            teamName: workItemQueryOptions.TeamName,
+            areaPath: workItemQueryOptions.AreaPath,
+            targetState: "Done", 
+            startDate: workItemQueryOptions.StartDateTime ?? DateTime.UtcNow.AddDays(-30),
+            endDate: workItemQueryOptions.EndDateTime ?? DateTime.UtcNow);
+    
+        if (workItemDetailsCollection?.value == null || !workItemDetailsCollection.value.Any())
+        {
+            return new List<(string Name, string Summary)>();
+        }
+
+        // Group work items by assignee and count
+        var workItemStatistics = workItemDetailsCollection.value
+            .GroupBy(w => w.fields?.SystemAssignedTo?.displayName ?? "Unassigned")
+            .Select(g => new
+            {
+                Name = g.Key,
+                WorkItemCount = g.Count()
+            })
+            .OrderByDescending(x => x.WorkItemCount)
+            .Select(x => (
+                Name: x.Name,
+                Summary: $"{x.WorkItemCount} work item{(x.WorkItemCount != 1 ? "s" : "")} completed"
+            ))
+            .ToList();
+
+        return workItemStatistics;
     }
 
     private async Task<List<(string Name, string Summary)>> GetCommitCollection()
@@ -726,7 +1199,7 @@
         return commitStatistics;
     }
 
-    private async Task<string> GetContributionDetails(string contributorName)
+    private async Task<string> GetCodeContributionDetails(string contributorName)
     {
         if (commitCollection?.value == null || !commitCollection.value.Any())
         {
@@ -779,6 +1252,9 @@
                .Append($"<div><strong>Total Lines Deleted:</strong> <span class='text-danger'>-{totalDeletedLines}</span></div>")
                .Append($"<div><strong>Total Files Changed:</strong> {totalFilesChanged}</div>")
                .Append("</div>");
+
+        // Add separator after summary
+        details.Append("<hr class='my-3' style='border-top: 2px solid var(--bs-primary); opacity: 0.3;'/>");
 
         foreach (var gitCommit in gitCommitCollection.Value)
         {
@@ -857,74 +1333,7 @@
         return details.ToString();
     }
 
-    private string GetContributionOverview(string contributorName)
-    {
-        if (commitCollection?.value == null || !commitCollection.value.Any())
-        {
-            return "<div class='commit-entry'><div class='commit-info'><em>No commits found.</em></div></div>";
-        }
-
-        // Filter commits for this specific contributor
-        var contributorCommits = this.commitCollection.value
-            .Where(c => (c.committer?.name ?? c.author?.name ?? "Unknown") == contributorName)
-            .OrderByDescending(c => c.committer?.date ?? c.author?.date ?? DateTime.MinValue)
-            .ToList();
-
-        if (!contributorCommits.Any())
-        {
-            return $"<div class='commit-entry'><div class='commit-info'><em>No commits found for {contributorName}.</em></div></div>";
-        }
-
-        var details = new System.Text.StringBuilder();
-
-        foreach (var commit in contributorCommits)
-        {
-            var commitDate = commit.committer?.date ?? commit.author?.date ?? DateTime.MinValue;
-            var authorName = commit.author?.name ?? "Unknown";
-            var authorEmail = commit.author?.email ?? "";
-            var commitMessage = commit.comment ?? "No message";
-            var commitIdShort = commit.commitId?.Substring(0, Math.Min(8, commit.commitId.Length)) ?? "Unknown";
-            
-            var additions = commit.changeCounts?.Add ?? 0;
-            var deletions = commit.changeCounts?.Delete ?? 0;
-            var edits = commit.changeCounts?.Edit ?? 0;
-
-            details.Append("<div class='commit-entry'>")
-                   .Append($"<div class='commit-header'>🔄 Commit: <span class='commit-hash'>{commitIdShort}...</span></div>")
-                   .Append($"<div class='commit-info'><strong>Author:</strong> {authorName}");
-            
-            if (!string.IsNullOrEmpty(authorEmail))
-            {
-                details.Append($" &lt;{authorEmail}&gt;");
-            }
-            
-            details.Append("</div>")
-                   .Append($"<div class='commit-info'><strong>Date:</strong> {commitDate:yyyy-MM-dd HH:mm:ss}</div>")
-                   .Append($"<div class='commit-info'><strong>Message:</strong> {System.Web.HttpUtility.HtmlEncode(commitMessage)}</div>")
-                   .Append($"<div class='commit-stats'>📊 Changes: <span class='text-success'>+{additions} additions</span>, <span class='text-danger'>-{deletions} deletions</span>, <span class='text-info'>{edits} files edited</span></div>");
-
-            if (!string.IsNullOrEmpty(commit.remoteUrl))
-            {
-                details.Append($"<div class='commit-info'>🌐 <strong>URL:</strong> <a href='{commit.remoteUrl}' target='_blank'>View Commit</a></div>");
-            }
-
-            details.Append("</div>");
-            
-            // Add separator between commits except for the last one
-            if (commit != contributorCommits.Last())
-            {
-                details.Append("<hr class='commit-separator'/>");
-            }
-        }
-
-        return details.ToString();
-    }
-
-    private string BuildGitCommitsSummaryHtml()
-    {
-        // This method is no longer used for gitCommits but kept for compatibility
-        return string.Empty;
-    }
+    WorkItemDetailsCollection? workItemDetailsCollection = null;
 
     CommitCollection? commitCollection = null;
 

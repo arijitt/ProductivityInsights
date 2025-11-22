@@ -1,6 +1,6 @@
 ﻿using Azure.Core;
-using Microsoft.Extensions.Options;
 using ProductivityInsights.Models;
+using ProductivityInsights.Models.CommitChanges;
 using ProductivityInsights.Utilities;
 using System.Net.Http.Headers;
 using System.Text.Json;

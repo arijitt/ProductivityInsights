@@ -1,4 +1,4 @@
-﻿namespace ProductivityInsights.Models
+﻿namespace ProductivityInsights.Models.CommitChanges
 {
     public enum CommitTypes
     {
