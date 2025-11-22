@@ -1,13 +1,13 @@
-﻿using Azure.Core;
-using ProductivityInsights.Models.WorkItems;
-using ProductivityInsights.Models.WorkItems.HistoryCollection;
-using ProductivityInsights.Utilities;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-
-namespace ProductivityInsights.Metrics
+﻿namespace ProductivityInsights.Metrics
 {
+    using Azure.Core;
+    using ProductivityInsights.Models.WorkItems;
+    using ProductivityInsights.Models.WorkItems.HistoryCollection;
+    using ProductivityInsights.Utilities;
+    using System.Net.Http.Headers;
+    using System.Text;
+    using System.Text.Json;
+
     public class WorkItemCompletionMetrics
     {
         public static async Task<WorkItemDetailsCollection> QueryWorkItemDetailsAsync(
@@ -67,9 +67,11 @@ namespace ProductivityInsights.Metrics
                 return workItemDetailsCollection;
             }
 
+#if DEBUG
             PrintUtilities.PrintSingleDashSeparator();
             Console.WriteLine($"📋 Found {queryResponse?.WorkItems.Count} work items moved to {targetState} state.");
             PrintUtilities.PrintSingleDashSeparator();
+#endif
 
             // Get detailed work item information
             workItemDetailsCollection = await GetWorkItemDetailsCollection(accessToken, organizationName, queryResponse);
@@ -108,8 +110,9 @@ namespace ProductivityInsights.Metrics
                 int skipCount = 0;
                 bool hasMoreRevisions = true;
 
-               
+#if DEBUG
                 Console.WriteLine($"[{i + 1}/{workItemDetailsCollection.count}] Getting history for work item {workItemId}:");
+#endif
 
                 while (hasMoreRevisions)
                 {
@@ -147,11 +150,16 @@ namespace ProductivityInsights.Metrics
                         if (hasMoreRevisions)
                         {
                             skipCount += batchSize;
+
+#if DEBUG
                             Console.WriteLine($"     Retrieved {batchedWorkItemHistoryCollection?.count} revisions for work item {workItemId} (total so far: {batchedWorkItemHistoryCollection?.value?.Count}). Getting next batch...");
+#endif
                         }
                         else
                         {
+#if DEBUG
                             Console.WriteLine($"     Retrieved {batchedWorkItemHistoryCollection?.count} revisions for work item {workItemId}.");
+#endif
                         }
                     }
                     else
@@ -162,13 +170,17 @@ namespace ProductivityInsights.Metrics
 
                 workItemHistoryCollectionMap.Add(workItemId, workItemRevisionCollection);
 
+#if DEBUG
                 PrintUtilities.PrintSingleDashSeparator();
+#endif
 
                 await Task.Delay(100);
             }
 
+#if DEBUG
             Console.WriteLine($"✓ Retrieved all work item histories for {workItemDetailsCollection.count} work items.");
             PrintUtilities.PrintSingleDashSeparator();
+#endif
 
             return workItemHistoryCollectionMap;
         }

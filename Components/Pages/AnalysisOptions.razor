@@ -317,7 +317,21 @@
 
     private void OnOptionSelected(string option)
     {
-        selectedOption = option;
+        // Close analysis results only if switching to a different tab type
+        if (selectedOption != option)
+        {
+            CloseAnalysisResults();
+            selectedOption = option;
+            
+            // Restore cached results if available for the new tab
+            if (cachedResults.TryGetValue(option, out var cached))
+            {
+                contributors = cached.Contributors;
+                contributorDetails = cached.Details;
+                expandedRows = cached.ExpandedRows;
+                analysisResultHtml = option;
+            }
+        }
     }
 
     private void OnTeamChanged(ChangeEventArgs e)
@@ -538,14 +552,39 @@
 
     private void CloseAnalysisResults()
     {
+        // Cache current results before clearing
+        if (!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any())
+        {
+            var cacheKey = selectedOption;
+            cachedResults[cacheKey] = (
+                new List<(string Name, string Summary)>(contributors),
+                new Dictionary<string, string>(contributorDetails),
+                new HashSet<string>(expandedRows)
+            );
+        }
+        
         analysisResultHtml = string.Empty;
         expandedRows.Clear();
         contributorDetails.Clear();
+        contributors.Clear();
     }
 
     private async Task ConfirmAnalysis()
     {
         await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
+
+        // Remove cached results for current tab to force fresh analysis
+        var cacheKey = selectedOption;
+        cachedResults.Remove(cacheKey);
+
+        // Close any existing analysis results before starting new analysis
+        if (!string.IsNullOrEmpty(analysisResultHtml))
+        {
+            analysisResultHtml = string.Empty;
+            expandedRows.Clear();
+            contributorDetails.Clear();
+            contributors.Clear();
+        }
 
         if (selectedOption == "gitCommits")
         {
@@ -1355,4 +1394,7 @@
     private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
     private bool isLoadingResults = false;
     private Dictionary<string, string> contributorDetails = new Dictionary<string, string>();
+    
+    // Cache analysis results per tab
+    private Dictionary<string, (List<(string Name, string Summary)> Contributors, Dictionary<string, string> Details, HashSet<string> ExpandedRows)> cachedResults = new Dictionary<string, (List<(string Name, string Summary)>, Dictionary<string, string>, HashSet<string>)>();
 }
