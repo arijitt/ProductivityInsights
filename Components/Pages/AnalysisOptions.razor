@@ -2,10 +2,12 @@
 @using ProductivityInsights.Metrics
 @using ProductivityInsights.Models
 @using ProductivityInsights.Models.CommitChanges
+@using ProductivityInsights.Models.Incidents
 @using ProductivityInsights.Models.WorkItems
 @using ProductivityInsights.Models.WorkItems.HistoryCollection
 @using ProductivityInsights.Options
 @using ProductivityInsights.Utilities
+@using System.Security.Cryptography.X509Certificates
 @rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
 
@@ -75,6 +77,10 @@
             else if (selectedOption == "workItems")
             {
                 @RenderWorkItemsResults()
+            }
+            else if (selectedOption == "icmResolutions")
+            {
+                @RenderICMIncidentsResults()
             }
             else
             {
@@ -664,6 +670,43 @@
                 }
             });
         }
+        else if (selectedOption == "icmResolutions")
+        {
+            isLoadingResults = true;
+            contributors = new List<(string Name, string Summary)>();
+            analysisResultHtml = "icmResolutions";
+            StateHasChanged();
+            
+            try
+            {
+                await Task.Delay(100);
+                await JSRuntime.InvokeVoidAsync("scrollToBottom", true);
+            }
+            catch { }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var results = await GetIncidentCollection();
+                    await InvokeAsync(() =>
+                    {
+                        contributors = results;
+                        isLoadingResults = false;
+                        StateHasChanged();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error loading incidents: {ex.Message}");
+                    await InvokeAsync(() =>
+                    {
+                        isLoadingResults = false;
+                        StateHasChanged();
+                    });
+                }
+            });
+        }
         else
         {
             analysisResultHtml = string.Empty;
@@ -831,6 +874,86 @@
         </div>
     };
 
+    private RenderFragment RenderICMIncidentsResults() => __builder =>
+    {
+        
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th colspan="3" class="text-center fw-bold table-title-header">
+                            ICM Incidents Summary for '@selectedOwningTeam'
+                        </th>
+                    </tr>
+                    <tr>
+                        <th scope="col">Contributor</th>
+                        <th scope="col">Summary</th>
+                        <th scope="col" style="width: 50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (isLoadingResults)
+                    {
+                        <tr>
+                            <td colspan="3" class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div class="mt-3 fw-semibold">Loading incident data...</div>
+                            </td>
+                        </tr>
+                    }
+                    else if (!contributors.Any())
+                    {
+                        <tr>
+                            <td colspan="3" class="text-center py-4 text-muted">
+                                No incidents found for the selected criteria.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var contributor in contributors)
+                    {
+                        var isExpanded = expandedRows.Contains(contributor.Name);
+                        <tr class="contributor-row">
+                            <td class="fw-normal">@contributor.Name</td>
+                            <td>@contributor.Summary</td>
+                            <td class="text-center">
+                                <button class="btn btn-sm btn-link expand-btn" @onclick="() => ToggleRow(contributor.Name)">
+                                    <span class="@(isExpanded ? "expanded" : "")">@(isExpanded ? "−" : "+")</span>
+                                </button>
+                            </td>
+                        </tr>
+                        @if (isExpanded)
+                        {
+                            <tr class="details-row">
+                                <td colspan="3">
+                                    <div class="commit-details">
+                                        @if (contributorDetails.ContainsKey(contributor.Name))
+                                        {
+                                            @((MarkupString)contributorDetails[contributor.Name])
+                                        }
+                                        else
+                                        {
+                                            <div class="text-center py-3">
+                                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                                <div class="mt-2">Loading incident details...</div>
+                                            </div>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    }
+                </tbody>
+            </table>
+        </div>
+    };
+
     private async Task ToggleRow(string contributorName)
     {
         if (expandedRows.Contains(contributorName))
@@ -851,15 +974,203 @@
                 {
                     details = await GetWorkContributionDetails(contributorName);
                 }
-                else // gitCommits
+                else if (selectedOption == "gitCommits")
                 {
                     details = await GetCodeContributionDetails(contributorName);
+                }
+                else // icmResolutions
+                {
+                    details = await GetIncidentAttendanceDetails(contributorName);
                 }
                 
                 contributorDetails[contributorName] = details;
                 StateHasChanged(); // Show loaded details
             }
         }
+    }
+
+    
+    private async Task<List<(string Name, string Summary)>> GetIncidentCollection()
+    {
+        IncidentQueryOptions incidentQueryOptions = GetIncidentQueryOptions();
+
+        X509Certificate2 keyvaultCertificate = await KeyVaultUtilities.GetCertificateAsync(
+            incidentQueryOptions.KeyVaultUrl,
+            incidentQueryOptions.KeyVaultCertificateName);
+
+        var resolvedIncidents = await IncidentAttendanceMetrics.SearchResolvedIncidentsAsync(
+            keyvaultCertificate,
+            incidentQueryOptions.OwningTeam,
+            incidentQueryOptions.StartDateTime, 
+            incidentQueryOptions.EndDateTime);
+
+        var mitigatedIncidents = await IncidentAttendanceMetrics.SearchMitigatedIncidentsAsync(
+            keyvaultCertificate,
+            incidentQueryOptions.OwningTeam,
+            incidentQueryOptions.StartDateTime,
+            incidentQueryOptions.EndDateTime);
+
+        // Combine resolved and mitigated incidents
+        var allIncidents = new List<IncidentValue>();
+        if (resolvedIncidents?.value != null)
+        {
+            allIncidents.AddRange(resolvedIncidents.value);
+        }
+        if (mitigatedIncidents?.value != null)
+        {
+            allIncidents.AddRange(mitigatedIncidents.value);
+        }
+
+        // Store incidents grouped by contributor
+        groupedIncidentsByContributor = new Dictionary<string, IncidentCollection>();
+        
+        foreach (var incident in allIncidents)
+        {
+            var changedBy = incident.ResolutionData?.ChangedBy ?? incident.MitigationData?.ChangedBy ?? "Unknown";
+            
+            if (!groupedIncidentsByContributor.ContainsKey(changedBy))
+            {
+                groupedIncidentsByContributor[changedBy] = new IncidentCollection { value = new List<IncidentValue>() };
+            }
+            
+            groupedIncidentsByContributor[changedBy].value?.Add(incident);
+        }
+
+        // Create summary statistics
+        var incidentStatistics = groupedIncidentsByContributor
+            .Select(g => new
+            {
+                Name = g.Key,
+                TotalIncidents = g.Value.value?.Count ?? 0,
+                ResolvedCount = g.Value.value?.Count(i => i.Status == "Resolved") ?? 0,
+                MitigatedCount = g.Value.value?.Count(i => i.Status == "Mitigated") ?? 0
+            })
+            .OrderByDescending(x => x.TotalIncidents)
+            .Select(x => (
+                Name: x.Name,
+                Summary: $"{x.TotalIncidents} incident{(x.TotalIncidents != 1 ? "s" : "")} ({x.ResolvedCount} resolved, {x.MitigatedCount} mitigated)"
+            ))
+            .ToList();
+
+        return incidentStatistics;
+    }
+
+    private async Task<string> GetIncidentAttendanceDetails(string contributorName)
+    {
+        if (groupedIncidentsByContributor == null || !groupedIncidentsByContributor.ContainsKey(contributorName))
+        {
+            return "<div class='incident-entry'><div class='incident-info'><em>No incidents found.</em></div></div>";
+        }
+
+        var contributorIncidents = groupedIncidentsByContributor[contributorName].value;
+        if (contributorIncidents == null || !contributorIncidents.Any())
+        {
+            return $"<div class='incident-entry'><div class='incident-info'><em>No incidents found for {contributorName}.</em></div></div>";
+        }
+
+        var orderedIncidents = contributorIncidents
+            .OrderBy(i => i.Severity ?? int.MaxValue)
+            .ThenBy(i => i.Status == "Resolved" ? 0 : 1)
+            .ThenByDescending(i => i.ResolutionData?.Date ?? i.MitigationData?.Date ?? i.ModifiedDate)
+            .ToList();
+
+        var details = new System.Text.StringBuilder();
+
+        // Calculate totals for contributor
+        var totalIncidents = orderedIncidents.Count;
+        var resolvedCount = orderedIncidents.Count(i => i.Status == "Resolved");
+        var mitigatedCount = orderedIncidents.Count(i => i.Status == "Mitigated");
+        var incidentsBySeverity = orderedIncidents
+            .GroupBy(i => i.Severity ?? 0)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Add contributor summary header
+        details.Append("<div class='contributor-summary mb-3 p-3' style='background-color: var(--bs-secondary-bg); border-left: 4px solid var(--bs-primary); border-radius: 4px;'>")
+               .Append($"<h6 class='fw-bold mb-2'>📊 Summary for {contributorName}</h6>")
+               .Append($"<div><strong>Total Incidents:</strong> {totalIncidents}</div>")
+               .Append($"<div><strong>Resolved:</strong> {resolvedCount}</div>")
+               .Append($"<div><strong>Mitigated:</strong> {mitigatedCount}</div>");
+
+        if (incidentsBySeverity.Any())
+        {
+            details.Append("<div class='mt-2'><strong>By Severity:</strong></div>")
+                   .Append("<div style='margin-left: 20px;'>");
+            foreach (var sev in incidentsBySeverity.OrderBy(kvp => kvp.Key))
+            {
+                details.Append($"<div>Severity {sev.Key}: {sev.Value}</div>");
+            }
+            details.Append("</div>");
+        }
+
+        details.Append("</div>");
+
+        // Add separator after summary
+        details.Append("<hr class='my-3' style='border-top: 2px solid var(--bs-primary); opacity: 0.3;'/>");
+
+        foreach (var incident in orderedIncidents)
+        {
+            var incidentId = incident.Id ?? "Unknown";
+            var title = incident.Title ?? "No title";
+            var status = incident.Status ?? "Unknown";
+            var severity = incident.Severity ?? 0;
+            var createdDate = incident.CreateDate;
+            var isOutage = incident.IsOutage;
+            var owningContactAlias = incident.OwningContactAlias ?? "Unknown";
+
+            var statusBadgeClass = status == "Resolved" ? "success" : status == "Mitigated" ? "warning" : "info";
+            var mitigatedByName = incident.MitigationData?.ChangedBy ?? "Unknown";
+            var resolvedByName = incident.ResolutionData?.ChangedBy ?? "Unknown";
+
+            details.Append("<div class='incident-entry'>")
+                   .Append($"<div class='incident-header'>🚨 <strong>Incident:</strong> <span class='incident-id'>#{incidentId}</span> - Severity {severity}</div>")
+                   .Append($"<div class='incident-info'>📋 <strong>Title:</strong> {System.Web.HttpUtility.HtmlEncode(title)}</div>")
+                   .Append($"<div class='incident-info'>📊 <strong>Status:</strong> <span class='badge bg-{statusBadgeClass}'>{status}</span></div>")
+                   .Append($"<div class='incident-info'>⚡ <strong>Severity:</strong> {severity}</div>");
+
+            if (isOutage)
+            {
+                details.Append("<div class='incident-info'>⛔ <strong>Outage:</strong> <span class='badge bg-danger'>Yes</span></div>");
+            }
+
+            details.Append($"<div class='incident-info'>👤 <strong>Owning Contact:</strong> {owningContactAlias}</div>")
+                   .Append($"<div class='incident-info'>📅 <strong>Created Date:</strong> {createdDate:yyyy-MM-dd HH:mm:ss}</div>");
+
+            if (incident.MitigationData != null)
+            {
+                details.Append($"<div class='incident-info'>✅ <strong>Mitigation Date:</strong> {incident.MitigationData.Date:yyyy-MM-dd HH:mm:ss}</div>")
+                       .Append($"<div class='incident-info'>👤 <strong>Mitigated By:</strong> {mitigatedByName}</div>");
+                
+                if (!string.IsNullOrEmpty(incident.MitigationData.Mitigation))
+                {
+                    details.Append($"<div class='incident-info'>💬 <strong>Mitigation:</strong> {System.Web.HttpUtility.HtmlEncode(incident.MitigationData.Mitigation)}</div>");
+                }
+
+                var timeToMitigate = incident.MitigationData.Date - createdDate;
+                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Mitigate:</strong> {timeToMitigate.TotalHours:F1} hours</div>");
+            }
+
+            if (incident.ResolutionData != null)
+            {
+                details.Append($"<div class='incident-info'>✅ <strong>Resolution Date:</strong> {incident.ResolutionData.Date:yyyy-MM-dd HH:mm:ss}</div>")
+                       .Append($"<div class='incident-info'>👤 <strong>Resolved By:</strong> {resolvedByName}</div>");
+
+                var timeToResolve = incident.ResolutionData.Date - createdDate;
+                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Resolve:</strong> {timeToResolve.TotalHours:F1} hours</div>");
+            }
+
+            // Add link to incident
+            details.Append($"<div class='incident-info'>🌐 <strong>URL:</strong> <a href='https://portal.microsofticm.com/imp/v5/incidents/details/{incidentId}/summary' target='_blank'>View Incident</a></div>");
+
+            details.Append("</div>");
+
+            // Add separator between incidents except for the last one
+            if (incident != orderedIncidents.Last())
+            {
+                details.Append("<hr class='incident-separator'/>");
+            }
+        }
+
+        return details.ToString();
     }
 
     private async Task<string> GetWorkContributionDetails(string contributorName)
@@ -1310,15 +1621,15 @@
             var filesChanged = gitCommit.ChangedFilesCommitTypes.Count;
 
             details.Append("<div class='commit-entry'>")
-                   .Append($"<div class='commit-header'>🔄 Commit: <span class='commit-hash'>{commitIdShort}...</span></div>")
-                   .Append($"<div class='commit-info'><strong>Author:</strong> {authorName}");
+                   .Append($"<div class='commit-header'>🔄 <strong>Commit:</strong> <span class='commit-hash'>{commitIdShort}...</span></div>")
+                   .Append($"<div class='commit-info'>👤 <strong>Author:</strong> {authorName}");
             
             if (!string.IsNullOrEmpty(authorEmail))
             {
                 details.Append($" &lt;{authorEmail}&gt;");
             }
             
-            details.Append($"<div class='commit-info'><strong>Committer:</strong> {committerName}");
+            details.Append($"<div class='commit-info'>✍️ <strong>Committer:</strong> {committerName}");
 
             if (!string.IsNullOrEmpty(committerEmail))
             {
@@ -1326,15 +1637,15 @@
             }
 
             details.Append("</div>")
-                   .Append($"<div class='commit-info'><strong>Date:</strong> {commitDate:yyyy-MM-dd HH:mm:ss}</div>")
-                   .Append($"<div class='commit-info'><strong>Message:</strong> {System.Web.HttpUtility.HtmlEncode(commitMessage)}</div>")
-                   .Append($"<div class='commit-stats'>📊 Line Changes: <span class='text-success'>+{addedLines} additions</span>, <span class='text-danger'>-{deletedLines} deletions</span></div>")
+                   .Append($"<div class='commit-info'>📅 <strong>Date:</strong> {commitDate:yyyy-MM-dd HH:mm:ss}</div>")
+                   .Append($"<div class='commit-info'>💬 <strong>Message:</strong> {System.Web.HttpUtility.HtmlEncode(commitMessage)}</div>")
+                   .Append($"<div class='commit-stats'>📊 <strong>Line Changes:</strong> <span class='text-success'>+{addedLines} additions</span>, <span class='text-danger'>-{deletedLines} deletions</span></div>")
                    .Append($"<div class='commit-info'><strong>📁 Files Changed:</strong> {filesChanged}</div>");
 
             // Show changed files details
             if (gitCommit.ChangedFilesCommitTypes.Any())
             {
-                details.Append("<div class='commit-files'><strong>Changed Files:</strong>");
+                details.Append("<div class='commit-files'>📝 <strong>Changed Files:</strong>");
                 foreach (var file in gitCommit.ChangedFilesCommitTypes.Take(10)) // Limit to first 10 files
                 {
                     var filePath = file.Key;
@@ -1344,12 +1655,12 @@
                     gitCommit.ChangedFilesAddedLineCounts.TryGetValue(filePath, out var fileAdded);
                     gitCommit.ChangedFilesDeletedLineCounts.TryGetValue(filePath, out var fileDeleted);
                     
-                    details.Append($"<div class='file-item'>📄 {System.Web.HttpUtility.HtmlEncode(filePath)} [{changeType}] (+{fileAdded}/-{fileDeleted})</div>");
+                    details.Append($"<div class='file-item' style='margin-left: 20px;'>📄 {System.Web.HttpUtility.HtmlEncode(filePath)} [{changeType}] (+{fileAdded}/-{fileDeleted})</div>");
                 }
                 
                 if (gitCommit.ChangedFilesCommitTypes.Count > 10)
                 {
-                    details.Append($"<div class='file-item'><em>... and {gitCommit.ChangedFilesCommitTypes.Count - 10} more files</em></div>");
+                    details.Append($"<div class='file-item' style='margin-left: 20px;'><em>... and {gitCommit.ChangedFilesCommitTypes.Count - 10} more files</em></div>");
                 }
                 
                 details.Append("</div>");
@@ -1373,8 +1684,8 @@
     }
 
     WorkItemDetailsCollection? workItemDetailsCollection = null;
-
     CommitCollection? commitCollection = null;
+    Dictionary<string, IncidentCollection>? groupedIncidentsByContributor = null;
 
     private string selectedOrganization = "msdata";
     private string selectedProject = "A365";
