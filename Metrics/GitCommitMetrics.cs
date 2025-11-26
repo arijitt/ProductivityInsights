@@ -509,7 +509,8 @@ namespace ProductivityInsights.Metrics
 
                     string? repositoryId = gitRepository.id;
 
-                    CommitLineChangeDetails? commitLineChangeDetails = null;
+                    // Store per-file line change details
+                    Dictionary<string, CommitLineChangeDetails> fileLineChangeDetailsMap = new Dictionary<string, CommitLineChangeDetails>();
 
                     // Process each changed file to calculate line changes
                     if (commitChanges.changes != null)
@@ -547,12 +548,12 @@ namespace ProductivityInsights.Metrics
                                 if (diffResponse.IsSuccessStatusCode)
                                 {
                                     string? diffContent = await diffResponse.Content.ReadAsStringAsync();
-                                    commitLineChangeDetails = JsonSerializer.Deserialize<CommitLineChangeDetails>(diffContent);
+                                    var commitLineChangeDetails = JsonSerializer.Deserialize<CommitLineChangeDetails>(diffContent);
 
-                                    // If we got details from the first file, we can break and use this for the whole commit
+                                    // Store the line change details for this specific file
                                     if (commitLineChangeDetails?.blocks != null)
                                     {
-                                        break;
+                                        fileLineChangeDetailsMap[filePath] = commitLineChangeDetails;
                                     }
                                 }
                                 else
@@ -585,7 +586,7 @@ namespace ProductivityInsights.Metrics
                         commitSummary,
                         commitDetails,
                         commitChanges,
-                        commitLineChangeDetails!,
+                        fileLineChangeDetailsMap,
                         commitLineChangeDetailsMap!);
 
                     gitCommitCollection.Value.Add(gitCommit);
@@ -723,8 +724,8 @@ namespace ProductivityInsights.Metrics
         /// parent commit information. Must not be null.</param>
         /// <param name="commitChangeCollection">The CommitChangeCollection representing the set of file changes included in the commit. May be null if no
         /// file changes are available.</param>
-        /// <param name="commitLineChangeDetails">The CommitLineChangeDetails object providing detailed line-by-line change information for the commit. May be
-        /// null if line-level details are not available.</param>
+        /// <param name="fileLineChangeDetailsMap">A dictionary mapping file paths to their CommitLineChangeDetails objects providing detailed line-by-line change 
+        /// information for each file. May be empty if line-level details are not available.</param>
         /// <param name="commitLineChangeDetailsMap">A dictionary mapping file paths to dictionaries of line count types and their corresponding counts, used to
         /// provide per-file line statistics. Must not be null and must contain entries for all changed files.</param>
         /// <returns>A GitCommit object containing the commit's metadata, file change types, and line change statistics. The
@@ -737,7 +738,7 @@ namespace ProductivityInsights.Metrics
             CommitValue commitValue,
             CommitDetailsCollection commitDetailsCollection,
             CommitChangeCollection commitChangeCollection,
-            CommitLineChangeDetails commitLineChangeDetails,
+            Dictionary<string, CommitLineChangeDetails> fileLineChangeDetailsMap,
             Dictionary<string, Dictionary<LineCountTypes, int>> commitLineChangeDetailsMap)
         {
             var gitCommit = new GitCommit
@@ -841,10 +842,11 @@ namespace ProductivityInsights.Metrics
                         continue;
                     }
 
-                    // Calculate line changes using the strongly-typed model
-                    if (commitLineChangeDetails?.blocks != null)
+                    // Calculate line changes using the per-file line change details
+                    if (fileLineChangeDetailsMap.TryGetValue(filePath, out var fileLineChangeDetails) && 
+                        fileLineChangeDetails?.blocks != null)
                     {
-                        foreach (var block in commitLineChangeDetails.blocks)
+                        foreach (var block in fileLineChangeDetails.blocks)
                         {
                             // Use the ChangeTypes enum values:
                             // 0 = Unchanged, 1 = Addition, 2 = Deletion, 3 = Modification

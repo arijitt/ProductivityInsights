@@ -1717,9 +1717,13 @@
                     var filePath = file.Key;
                     var changeType = file.Value;
                     
-                    // Get per-file line counts
-                    gitCommit.ChangedFilesAddedLineCounts.TryGetValue(filePath, out var fileAdded);
-                    gitCommit.ChangedFilesDeletedLineCounts.TryGetValue(filePath, out var fileDeleted);
+                    // Get per-file line counts with proper default values
+                    var fileAdded = gitCommit.ChangedFilesAddedLineCounts?.ContainsKey(filePath) == true 
+                        ? gitCommit.ChangedFilesAddedLineCounts[filePath] 
+                        : 0;
+                    var fileDeleted = gitCommit.ChangedFilesDeletedLineCounts?.ContainsKey(filePath) == true 
+                        ? gitCommit.ChangedFilesDeletedLineCounts[filePath] 
+                        : 0;
                     
                     details.Append($"<div class='file-item' style='margin-left: 20px;'>📄 {System.Web.HttpUtility.HtmlEncode(filePath)} [{changeType}] (+{fileAdded}/-{fileDeleted})</div>");
                 }
