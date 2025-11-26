@@ -14,7 +14,7 @@
 <PageTitle>Productivity Overview</PageTitle>
 
 <div class="container mt-4">
-    <h1 class="text-center mb-4 fw-bold">Productivity Analysis</h1>
+    <h1 class="text-center mb-4 fw-bold">Productivity Insights</h1>
 
     <ul class="nav nav-tabs mb-4 shadow-sm" role="tablist">
         <li class="nav-item" role="presentation">
@@ -109,7 +109,6 @@
                 }
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" @onclick="CloseModal">Close</button>
                 <button type="button" class="btn btn-primary" @onclick="ConfirmAnalysis">Confirm & Run</button>
             </div>
         </div>
@@ -279,9 +278,10 @@
         <div class="mb-4">
             <label for="owningTeamSelect" class="form-label">Owning Team</label>
             <select id="owningTeamSelect" class="form-select" @bind="selectedOwningTeam">
-                <option value="AZURESYNAPSEJOBSERVICE\CorePlatform">AZURESYNAPSEJOBSERVICE\CorePlatform</option>
                 <option value="AZURESYNAPSEJOBSERVICE\JobPlatform">AZURESYNAPSEJOBSERVICE\JobPlatform</option>
                 <option value="AZURESYNAPSEJOBSERVICE\BBCTeam">AZURESYNAPSEJOBSERVICE\BBCTeam</option>
+                <option value="AZURESYNAPSEJOBSERVICE\CorePlatform">AZURESYNAPSEJOBSERVICE\CorePlatform</option>
+                <option value="SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption">SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption</option>
             </select>
         </div>
 
@@ -1010,6 +1010,18 @@
             incidentQueryOptions.StartDateTime,
             incidentQueryOptions.EndDateTime);
 
+        // Fetch active incidents
+        activeIncidents = await IncidentAttendanceMetrics.SearchAllActiveIncidentsAsync(
+            keyvaultCertificate,
+            incidentQueryOptions.OwningTeam);
+
+        // Fetch created incidents
+        createdIncidents = await IncidentAttendanceMetrics.SearchCreatedIncidentsAsync(
+            keyvaultCertificate,
+            incidentQueryOptions.OwningTeam,
+            incidentQueryOptions.StartDateTime,
+            incidentQueryOptions.EndDateTime);
+
         // Combine resolved and mitigated incidents
         var allIncidents = new List<IncidentValue>();
         if (resolvedIncidents?.value != null)
@@ -1043,12 +1055,14 @@
                 Name = g.Key,
                 TotalIncidents = g.Value.value?.Count ?? 0,
                 ResolvedCount = g.Value.value?.Count(i => i.Status == "Resolved") ?? 0,
-                MitigatedCount = g.Value.value?.Count(i => i.Status == "Mitigated") ?? 0
+                MitigatedCount = g.Value.value?.Count(i => i.Status == "Mitigated") ?? 0,
+                ActiveCount = activeIncidents?.value?.Count(i => i.OwningContactAlias?.Equals(g.Key, StringComparison.OrdinalIgnoreCase) == true) ?? 0,
+                CreatedCount = createdIncidents?.value?.Count(i => i.OwningContactAlias?.Equals(g.Key, StringComparison.OrdinalIgnoreCase) == true) ?? 0
             })
             .OrderByDescending(x => x.TotalIncidents)
             .Select(x => (
                 Name: x.Name,
-                Summary: $"{x.TotalIncidents} incident{(x.TotalIncidents != 1 ? "s" : "")} ({x.ResolvedCount} resolved, {x.MitigatedCount} mitigated)"
+                Summary: $"{x.TotalIncidents} incident{(x.TotalIncidents != 1 ? "s" : "")} closed ({x.ResolvedCount} resolved, {x.MitigatedCount} mitigated, {x.ActiveCount} active, {x.CreatedCount} created)"
             ))
             .ToList();
 
@@ -1084,6 +1098,28 @@
             .GroupBy(i => i.Severity ?? 0)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        // Calculate TTR (Time To Resolve) statistics
+        var timeToResolveList = new List<double>();
+        foreach (var incident in orderedIncidents.Where(i => i.Status == "Resolved" && i.ResolutionData != null))
+        {
+            var ttr = (incident.ResolutionData!.Date - incident.CreateDate).TotalHours;
+            if (ttr >= 0)
+            {
+                timeToResolveList.Add(ttr);
+            }
+        }
+
+        // Calculate TTM (Time To Mitigate) statistics
+        var timeToMitigateList = new List<double>();
+        foreach (var incident in orderedIncidents.Where(i => i.MitigationData != null))
+        {
+            var ttm = (incident.MitigationData!.Date - incident.CreateDate).TotalHours;
+            if (ttm >= 0)
+            {
+                timeToMitigateList.Add(ttm);
+            }
+        }
+
         // Add contributor summary header
         details.Append("<div class='contributor-summary mb-3 p-3' style='background-color: var(--bs-secondary-bg); border-left: 4px solid var(--bs-primary); border-radius: 4px;'>")
                .Append($"<h6 class='fw-bold mb-2'>📊 Summary for {contributorName}</h6>")
@@ -1100,6 +1136,36 @@
                 details.Append($"<div>Severity {sev.Key}: {sev.Value}</div>");
             }
             details.Append("</div>");
+        }
+
+        // Add TTM statistics
+        if (timeToMitigateList.Any())
+        {
+            var minTTM = timeToMitigateList.Min();
+            var maxTTM = timeToMitigateList.Max();
+            var avgTTM = timeToMitigateList.Average();
+
+            details.Append("<div class='mt-2'><strong>⚡ Time To Mitigate (TTM):</strong></div>")
+                   .Append("<div style='margin-left: 20px;'>")
+                   .Append($"<div>Minimum: {FormatTTR(minTTM)}</div>")
+                   .Append($"<div>Average: {FormatTTR(avgTTM)}</div>")
+                   .Append($"<div>Maximum: {FormatTTR(maxTTM)}</div>")
+                   .Append("</div>");
+        }
+
+        // Add TTR statistics
+        if (timeToResolveList.Any())
+        {
+            var minTTR = timeToResolveList.Min();
+            var maxTTR = timeToResolveList.Max();
+            var avgTTR = timeToResolveList.Average();
+
+            details.Append("<div class='mt-2'><strong>⏱️ Time To Resolve (TTR):</strong></div>")
+                   .Append("<div style='margin-left: 20px;'>")
+                   .Append($"<div>Minimum: {FormatTTR(minTTR)}</div>")
+                   .Append($"<div>Average: {FormatTTR(avgTTR)}</div>")
+                   .Append($"<div>Maximum: {FormatTTR(maxTTR)}</div>")
+                   .Append("</div>");
         }
 
         details.Append("</div>");
@@ -1146,7 +1212,7 @@
                 }
 
                 var timeToMitigate = incident.MitigationData.Date - createdDate;
-                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Mitigate:</strong> {timeToMitigate.TotalHours:F1} hours</div>");
+                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Mitigate (TTM):</strong> {timeToMitigate.TotalHours:F1} hours</div>");
             }
 
             if (incident.ResolutionData != null)
@@ -1155,7 +1221,7 @@
                        .Append($"<div class='incident-info'>👤 <strong>Resolved By:</strong> {resolvedByName}</div>");
 
                 var timeToResolve = incident.ResolutionData.Date - createdDate;
-                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Resolve:</strong> {timeToResolve.TotalHours:F1} hours</div>");
+                details.Append($"<div class='incident-info'>⏱️ <strong>Time to Resolve (TTR):</strong> {timeToResolve.TotalHours:F1} hours</div>");
             }
 
             // Add link to incident
@@ -1683,9 +1749,28 @@
         return details.ToString();
     }
 
+    private string FormatTTR(double hours)
+    {
+        if (hours < 1)
+        {
+            return $"{hours * 60:F0} minutes";
+        }
+        else if (hours < 24)
+        {
+            return $"{hours:F1} hours";
+        }
+        else
+        {
+            var days = hours / 24;
+            return $"{days:F1} days";
+        }
+    }
+
     WorkItemDetailsCollection? workItemDetailsCollection = null;
     CommitCollection? commitCollection = null;
     Dictionary<string, IncidentCollection>? groupedIncidentsByContributor = null;
+    IncidentCollection? activeIncidents = null;
+    IncidentCollection? createdIncidents = null;
 
     private string selectedOrganization = "msdata";
     private string selectedProject = "A365";
@@ -1694,7 +1779,7 @@
     private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
     private string selectedGitRepository = "BBC-VHD";
     private string selectedTargetBranch = "master";
-    private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\CorePlatform";
+    private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
     private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
     private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
     private DateTime? startDateTime = DateTime.Now.AddDays(-30);

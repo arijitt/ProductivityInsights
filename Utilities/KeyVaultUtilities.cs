@@ -38,7 +38,9 @@
                 var certClient = new CertificateClient(vaultUri, credential);
                 var secretClient = new SecretClient(vaultUri, credential);
 
+#if DEBUG
                 Console.WriteLine($"🔑 Retrieving certificate metadata '{certificateName}' from Key Vault '{vaultUri.Host}'...");
+#endif
 
                 var certResponse = await certClient.GetCertificateAsync(certificateName);
                 if (certResponse?.Value == null)
@@ -47,7 +49,10 @@
                 // The certificate's secret (PFX) is usually stored under the same name
                 var secretName = certResponse.Value.Name;
 
+#if DEBUG
                 Console.WriteLine($"🔐 Retrieving secret '{secretName}' (PFX) from Key Vault...");
+#endif
+
                 var secretResponse = await secretClient.GetSecretAsync(secretName);
                 if (secretResponse?.Value == null)
                     throw new InvalidOperationException($"Secret for certificate '{certificateName}' not found in Key Vault '{vaultUri.Host}'.");
@@ -61,7 +66,10 @@
                 _keyVaultCertificate = new X509Certificate2(certBytes, (string?)null,
                     X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
 
+#if DEBUG
                 Console.WriteLine($"✓ Successfully retrieved certificate '{certificateName}' from Key Vault '{vaultUri.Host}'.");
+#endif
+
                 return _keyVaultCertificate;
             }
             catch (Exception ex)

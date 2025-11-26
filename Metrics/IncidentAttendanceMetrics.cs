@@ -11,13 +11,20 @@
     {
 
         /// <summary>
-        /// Searches for all active incidents for a given team using certificate authentication
+        /// Asynchronously retrieves all active incidents from the ICM system that are owned by the specified team.
         /// </summary>
-        /// <param name="keyVaultURL">Azure Key Vault URL containing the ICM certificate</param>
-        /// <param name="keyVaultCertificateName">Name of the certificate in Key Vault</param>
-        /// <param name="owningTeamName">The owning team name or ID to filter incidents</param>
-        /// <returns>List of active incidents found</returns>
-        public static async Task<IncidentCollection?> SearchAllActiveIncidentsAsync(X509Certificate2 icmCertificate, string owningTeamName)
+        /// <remarks>This method queries the ICM OData API and automatically handles paging to return all
+        /// matching active incidents. The method returns null if the API request fails or if deserialization of the
+        /// response is unsuccessful.</remarks>
+        /// <param name="icmCertificate">The X.509 certificate used to authenticate the request to the ICM API. Must be valid and trusted by the ICM
+        /// service.</param>
+        /// <param name="owningTeamName">The name or ID of the team whose active incidents are to be retrieved. If null or empty, no team filter is
+        /// applied.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains an IncidentCollection with all
+        /// active incidents matching the specified team, or null if the request fails or no incidents are found.</returns>
+        public static async Task<IncidentCollection?> SearchAllActiveIncidentsAsync(
+            X509Certificate2 icmCertificate,
+            string owningTeamName)
         {
             try
             {
@@ -47,7 +54,9 @@
                 string queryFilter = "?$filter=" + string.Join(" and ", queryOptions);
                 string queryURL = queryBaseURL + queryFilter;
 
+#if DEBUG
                 Console.WriteLine($"🔍 Querying active ICM incidents from URL: {queryURL}");
+#endif
 
                 // Create HttpClientHandler with the certificate
                 var handler = new HttpClientHandler();
@@ -65,7 +74,10 @@
                 while (!string.IsNullOrEmpty(nextLink))
                 {
                     pageCount++;
+
+#if DEBUG
                     Console.WriteLine($"  📄 Fetching page {pageCount}...");
+#endif
 
                     // Submit the request
                     var httpResponse = await httpClient.GetAsync(nextLink);
@@ -93,14 +105,19 @@
                     if (pageResult.value != null && pageResult.value.Count > 0)
                     {
                         allIncidents.AddRange(pageResult.value);
+
+#if DEBUG
                         Console.WriteLine($"    Retrieved {pageResult.value.Count} incidents from page {pageCount} (Total so far: {allIncidents.Count})");
+#endif
                     }
 
                     // Check for next link
                     nextLink = pageResult.odatanextLink;
                 }
 
+#if DEBUG
                 Console.WriteLine($"✓ Successfully retrieved {allIncidents.Count} active incident details across {pageCount} page(s).");
+#endif
 
                 // Return combined results
                 var combinedResult = new IncidentCollection
@@ -122,14 +139,19 @@
         }
 
         /// <summary>
-        /// Searches for resolved incidents within a date range for a given team using certificate authentication
+        /// Asynchronously searches for resolved incidents in ICM that match the specified team and date range.
         /// </summary>
-        /// <param name="keyVaultURL">Azure Key Vault URL containing the ICM certificate</param>
-        /// <param name="keyVaultCertificateName">Name of the certificate in Key Vault</param>
-        /// <param name="owningTeamName">The owning team name or ID to filter incidents</param>
-        /// <param name="startDate">Start date for incident search</param>
-        /// <param name="endDate">End date for incident search</param>
-        /// <returns>List of resolved incidents found</returns>
+        /// <remarks>This method queries the ICM OData API for incidents with a status of 'Resolved' and
+        /// filters results by the specified team and resolution date range. The method handles paginated results and
+        /// combines all incidents into a single collection. If the API request fails or deserialization is
+        /// unsuccessful, the method returns null.</remarks>
+        /// <param name="icmCertificate">The X.509 certificate used to authenticate the request to the ICM API. Cannot be null.</param>
+        /// <param name="owningTeamName">The name or ID of the owning team to filter incidents by. If null or empty, no team filter is applied.</param>
+        /// <param name="startDate">The start of the date range (inclusive) for the incident resolution date. If null, no lower bound is
+        /// applied.</param>
+        /// <param name="endDate">The end of the date range (inclusive) for the incident resolution date. If null, no upper bound is applied.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains an IncidentCollection with the
+        /// resolved incidents that match the criteria, or null if the query fails or no incidents are found.</returns>
         public static async Task<IncidentCollection?> SearchResolvedIncidentsAsync(
             X509Certificate2 icmCertificate,
             string owningTeamName,
@@ -169,7 +191,9 @@
                 string queryFilter = "?$filter=" + string.Join(" and ", queryOptions);
                 string queryURL = queryBaseURL + queryFilter;
 
+#if DEBUG
                 Console.WriteLine($"🔍 Querying resolved ICM incidents from URL: {queryURL}");
+#endif
 
                 // Create HttpClientHandler with the certificate
                 var handler = new HttpClientHandler();
@@ -187,7 +211,10 @@
                 while (!string.IsNullOrEmpty(nextLink))
                 {
                     pageCount++;
+
+#if DEBUG
                     Console.WriteLine($"  📄 Fetching page {pageCount}...");
+#endif
 
                     // Submit the request
                     var httpResponse = await httpClient.GetAsync(nextLink);
@@ -215,14 +242,19 @@
                     if (pageResult.value != null && pageResult.value.Count > 0)
                     {
                         allIncidents.AddRange(pageResult.value);
+
+#if DEBUG
                         Console.WriteLine($"    Retrieved {pageResult.value.Count} incidents from page {pageCount} (Total so far: {allIncidents.Count})");
+#endif
                     }
 
                     // Check for next link
                     nextLink = pageResult.odatanextLink;
                 }
 
+#if DEBUG
                 Console.WriteLine($"✓ Successfully retrieved {allIncidents.Count} resolved incident details across {pageCount} page(s).");
+#endif
 
                 // Return combined results
                 var combinedResult = new IncidentCollection
@@ -244,14 +276,21 @@
         }
 
         /// <summary>
-        /// Searches for incidents that have been mitigated but not yet resolved within a date range for a given team using certificate authentication
+        /// Asynchronously searches for incidents that have been mitigated but not resolved, filtered by owning team and
+        /// mitigation date range.
         /// </summary>
-        /// <param name="keyVaultURL">Azure Key Vault URL containing the ICM certificate</param>
-        /// <param name="keyVaultCertificateName">Name of the certificate in Key Vault</param>
-        /// <param name="owningTeamName">The owning team name or ID to filter incidents</param>
-        /// <param name="startDate">Start date for mitigation search</param>
-        /// <param name="endDate">End date for mitigation search</param>
-        /// <returns>List of mitigated but not resolved incidents found</returns>
+        /// <remarks>This method queries the ICM OData API for incidents with a status of 'Mitigated' and
+        /// returns all matching results, handling pagination automatically. The search is limited to incidents whose
+        /// mitigation date falls within the specified range. The method returns null if the API request fails or if
+        /// deserialization of the response is unsuccessful.</remarks>
+        /// <param name="icmCertificate">The X.509 certificate used to authenticate the request to the ICM API. Cannot be null.</param>
+        /// <param name="owningTeamName">The name or ID of the team that owns the incidents to search for. If null or empty, no team filter is
+        /// applied.</param>
+        /// <param name="startDate">The start of the mitigation date range. Only incidents mitigated on or after this date are included.</param>
+        /// <param name="endDate">The end of the mitigation date range. Only incidents mitigated on or before this date are included.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains an IncidentCollection with all
+        /// mitigated but not resolved incidents matching the specified criteria, or null if the request fails or no
+        /// incidents are found.</returns>
         public static async Task<IncidentCollection?> SearchMitigatedIncidentsAsync(
             X509Certificate2 icmCertificate,
             string owningTeamName,
@@ -292,7 +331,9 @@
                 string queryFilter = "?$filter=" + string.Join(" and ", queryOptions);
                 string queryURL = queryBaseURL + queryFilter;
 
+#if DEBUG
                 Console.WriteLine($"🔍 Querying mitigated ICM incidents from URL: {queryURL}");
+#endif
 
                 // Create HttpClientHandler with the certificate
                 var handler = new HttpClientHandler();
@@ -310,7 +351,10 @@
                 while (!string.IsNullOrEmpty(nextLink))
                 {
                     pageCount++;
+
+#if DEBUG
                     Console.WriteLine($"  📄 Fetching page {pageCount}...");
+#endif
 
                     // Submit the request
                     var httpResponse = await httpClient.GetAsync(nextLink);
@@ -338,14 +382,20 @@
                     if (pageResult.value != null && pageResult.value.Count > 0)
                     {
                         allIncidents.AddRange(pageResult.value);
+
+#if DEBUG
                         Console.WriteLine($"    Retrieved {pageResult.value.Count} incidents from page {pageCount} (Total so far: {allIncidents.Count})");
+#endif
                     }
 
                     // Check for next link
                     nextLink = pageResult.odatanextLink;
                 }
 
+#if DEBUG
+
                 Console.WriteLine($"✓ Successfully retrieved {allIncidents.Count} mitigated but not resolved incident details across {pageCount} page(s).");
+#endif
 
                 // Return combined results
                 var combinedResult = new IncidentCollection
@@ -367,14 +417,21 @@
         }
 
         /// <summary>
-        /// Searches for created incidents within a date range for a given team using certificate authentication
+        /// Searches for incidents created within a specified date range and owned by a given team using the ICM OData
+        /// API.
         /// </summary>
-        /// <param name="keyVaultURL">Azure Key Vault URL containing the ICM certificate</param>
-        /// <param name="keyVaultCertificateName">Name of the certificate in Key Vault</param>
-        /// <param name="owningTeamName">The owning team name or ID to filter incidents</param>
-        /// <param name="startDate">Start date for incident creation search</param>
-        /// <param name="endDate">End date for incident creation search</param>
-        /// <returns>List of created incidents found</returns>
+        /// <remarks>The method retrieves all matching incidents, handling pagination automatically. The
+        /// search uses the ICM OData API and requires a valid client certificate for authentication. If the API request
+        /// fails or the response cannot be deserialized, the method returns null.</remarks>
+        /// <param name="icmCertificate">The X.509 certificate used to authenticate the request to the ICM API. Cannot be null.</param>
+        /// <param name="owningTeamName">The name or ID of the team that owns the incidents to search for. If null or empty, no team filter is
+        /// applied.</param>
+        /// <param name="startDate">The start of the date range for incident creation. Only incidents created on or after this date are
+        /// included. Must not be null.</param>
+        /// <param name="endDate">The end of the date range for incident creation. Only incidents created on or before this date are included.
+        /// Must not be null.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains an IncidentCollection with the
+        /// matching incidents, or null if the request fails or no incidents are found.</returns>
         public static async Task<IncidentCollection?> SearchCreatedIncidentsAsync(
             X509Certificate2 icmCertificate,
             string owningTeamName,
@@ -411,7 +468,9 @@
                 string queryFilter = "?$filter=" + string.Join(" and ", queryOptions);
                 string queryURL = queryBaseURL + queryFilter;
 
+#if DEBUG
                 Console.WriteLine($"🔍 Querying created ICM incidents from URL: {queryURL}");
+#endif
 
                 // Create HttpClientHandler with the certificate
                 var handler = new HttpClientHandler();
@@ -429,7 +488,10 @@
                 while (!string.IsNullOrEmpty(nextLink))
                 {
                     pageCount++;
+
+#if DEBUG
                     Console.WriteLine($"  📄 Fetching page {pageCount}...");
+#endif
 
                     // Submit the request
                     var httpResponse = await httpClient.GetAsync(nextLink);
@@ -457,14 +519,19 @@
                     if (pageResult.value != null && pageResult.value.Count > 0)
                     {
                         allIncidents.AddRange(pageResult.value);
+
+#if DEBUG
                         Console.WriteLine($"    Retrieved {pageResult.value.Count} incidents from page {pageCount} (Total so far: {allIncidents.Count})");
+#endif
                     }
 
                     // Check for next link
                     nextLink = pageResult.odatanextLink;
                 }
 
+#if DEBUG
                 Console.WriteLine($"✓ Successfully retrieved {allIncidents.Count} created incident details across {pageCount} page(s).");
+#endif
 
                 // Return combined results
                 var combinedResult = new IncidentCollection
@@ -485,15 +552,11 @@
             }
         }
 
+       
         /// <summary>
-        /// Prints the details of each incident in the specified collection to the console in a formatted manner.
+        /// 
         /// </summary>
-        /// <remarks>This method outputs incident information directly to the standard console. It is
-        /// intended for diagnostic or informational purposes and does not return any data. The output includes key
-        /// incident fields such as ID, title, status, severity, and relevant dates. Additional fields may be added as
-        /// necessary.</remarks>
-        /// <param name="incidentCollection">The collection of incidents to be printed. If the collection or its value property is null, a message
-        /// indicating that there are no incidents to print is displayed.</param>
+        /// <param name="incidentCollection"></param>
         public static void PrintIncidents(IncidentCollection incidentCollection)
         {
             if (incidentCollection?.value == null)
