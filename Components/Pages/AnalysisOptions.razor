@@ -1671,9 +1671,16 @@
             return new List<(string Name, string Summary)>();
         }
 
-        // Group commits by author/committer name and aggregate
+        // Group commits by author and committer name pair
         var commitStatistics = commitCollection.value
-            .GroupBy(c => c.committer?.name ?? c.author?.name ?? "Unknown")
+            .GroupBy(c =>
+            {
+                var authorName = c.author?.name ?? "Unknown";
+                var committerName = c.committer?.name ?? "Unknown";
+                return authorName == committerName
+                    ? authorName
+                    : $"👤 {authorName} / ✍️ {committerName}";
+            })
             .Select(g => new
             {
                 Name = g.Key,
@@ -1701,7 +1708,15 @@
         }
 
         var contributorCommits = this.commitCollection.value
-           .Where(c => (c.committer?.name ?? c.author?.name ?? "Unknown") == contributorName)
+           .Where(c =>
+           {
+               var authorName = c.author?.name ?? "Unknown";
+               var committerName = c.committer?.name ?? "Unknown";
+               var key = authorName == committerName
+                   ? authorName
+                   : $"👤 {authorName} / ✍️ {committerName}";
+               return key == contributorName;
+           })
            .OrderByDescending(c => c.committer?.date ?? c.author?.date ?? DateTime.MinValue)
            .ToList();
 
