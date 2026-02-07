@@ -58,7 +58,7 @@
         public string? url { get; set; }
         public ProjectDetails? project { get; set; }
         public string? defaultBranch { get; set; }
-        public int size { get; set; }
+        public long size { get; set; }
         public string? remoteUrl { get; set; }
         public string? sshUrl { get; set; }
         public string? webUrl { get; set; }

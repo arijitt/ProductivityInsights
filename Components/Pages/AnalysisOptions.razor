@@ -16,78 +16,113 @@
 <div class="container mt-4">
     <h1 class="text-center mb-4 fw-bold">Productivity Insights</h1>
 
-    <ul class="nav nav-tabs mb-4 shadow-sm" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link fs-5 fw-bold @(selectedOption == "workItems" ? "active" : "")" 
-                    type="button" 
-                    @onclick="@(() => OnOptionSelected("workItems"))">
-                Work Items
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link fs-5 fw-bold @(selectedOption == "gitCommits" ? "active" : "")" 
-                    type="button" 
-                    @onclick="@(() => OnOptionSelected("gitCommits"))">
-                Git Commits
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link fs-5 fw-bold @(selectedOption == "icmResolutions" ? "active" : "")" 
-                    type="button" 
-                    @onclick="@(() => OnOptionSelected("icmResolutions"))">
-                ICM Resolutions
-            </button>
-        </li>
-    </ul>
+    <div class="content-wrapper">
+        <!-- Vertical Sidebar -->
+        <ul class="nav nav-tabs nav-tabs-vertical shadow-sm" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fs-5 fw-bold @(selectedView == "details" ? "active" : "")" 
+                        type="button" 
+                        @onclick="@(() => selectedView = "details")">
+                    Details
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fs-5 fw-bold @(selectedView == "trends" ? "active" : "")" 
+                        type="button" 
+                        @onclick="@(() => selectedView = "trends")">
+                    Trends
+                </button>
+            </li>
+        </ul>
 
-    <div class="tab-content shadow-sm border border-top-0 rounded-bottom p-4">
-        <div class="tab-pane fade @(selectedOption == "workItems" ? "show active" : "")" role="tabpanel">
-            @if (selectedOption == "workItems")
+        <!-- Main Content -->
+        <div class="main-panel">
+            <!-- Horizontal Tabs -->
+            <ul class="nav nav-tabs mb-0 shadow-sm" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fs-5 fw-bold @(selectedOption == "workItems" ? "active" : "")" 
+                            type="button" 
+                            @onclick="@(() => OnOptionSelected("workItems"))">
+                        Work Items
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fs-5 fw-bold @(selectedOption == "gitCommits" ? "active" : "")" 
+                            type="button" 
+                            @onclick="@(() => OnOptionSelected("gitCommits"))">
+                        Git Commits
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fs-5 fw-bold @(selectedOption == "icmResolutions" ? "active" : "")" 
+                            type="button" 
+                            @onclick="@(() => OnOptionSelected("icmResolutions"))">
+                        ICM Resolutions
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content shadow-sm border border-top-0 rounded-bottom p-4">
+                <div class="tab-pane fade @(selectedOption == "workItems" ? "show active" : "")" role="tabpanel">
+                    @if (selectedOption == "workItems")
+                    {
+                        <h4 class="mb-4">Work Items Analysis</h4>
+                        @RenderAnalysisForm()
+                    }
+                </div>
+                <div class="tab-pane fade @(selectedOption == "gitCommits" ? "show active" : "")" role="tabpanel">
+                    @if (selectedOption == "gitCommits")
+                    {
+                        <h4 class="mb-4">Git Commits Analysis</h4>
+                        @RenderGitCommitsForm()
+                    }
+                </div>
+                <div class="tab-pane fade @(selectedOption == "icmResolutions" ? "show active" : "")" role="tabpanel">
+                    @if (selectedOption == "icmResolutions")
+                    {
+                        <h4 class="mb-4">ICM Resolutions Analysis</h4>
+                        @RenderICMAnalysisForm()
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(analysisResultHtml))
             {
-                <h4 class="mb-4">Work Items Analysis</h4>
-                @RenderAnalysisForm()
-            }
-        </div>
-        <div class="tab-pane fade @(selectedOption == "gitCommits" ? "show active" : "")" role="tabpanel">
-            @if (selectedOption == "gitCommits")
-            {
-                <h4 class="mb-4">Git Commits Analysis</h4>
-                @RenderGitCommitsForm()
-            }
-        </div>
-        <div class="tab-pane fade @(selectedOption == "icmResolutions" ? "show active" : "")" role="tabpanel">
-            @if (selectedOption == "icmResolutions")
-            {
-                <h4 class="mb-4">ICM Resolutions Analysis</h4>
-                @RenderICMAnalysisForm()
+                <div class="analysis-results mt-4">
+                    <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                    @if (selectedView == "details")
+                    {
+                        @if (selectedOption == "gitCommits")
+                        {
+                            @RenderGitCommitsResults()
+                        }
+                        else if (selectedOption == "workItems")
+                        {
+                            @RenderWorkItemsResults()
+                        }
+                        else if (selectedOption == "icmResolutions")
+                        {
+                            @RenderICMIncidentsResults()
+                        }
+                        else
+                        {
+                            @((MarkupString)analysisResultHtml)
+                        }
+                    }
+                    else if (selectedView == "trends")
+                    {
+                        <div class="trends-placeholder">
+                            <div class="trends-icon">📈</div>
+                            <h4>Trend Graphs</h4>
+                            <p class="text-muted">Trend visualization coming soon...</p>
+                        </div>
+                    }
+                </div>
             }
         </div>
     </div>
-
-    @if (!string.IsNullOrEmpty(analysisResultHtml))
-    {
-        <div class="analysis-results mt-4">
-            <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
-                <span aria-hidden="true">×</span>
-            </button>
-            @if (selectedOption == "gitCommits")
-            {
-                @RenderGitCommitsResults()
-            }
-            else if (selectedOption == "workItems")
-            {
-                @RenderWorkItemsResults()
-            }
-            else if (selectedOption == "icmResolutions")
-            {
-                @RenderICMIncidentsResults()
-            }
-            else
-            {
-                @((MarkupString)analysisResultHtml)
-            }
-        </div>
-    }
 </div>
 
 <!-- Modal for showing analysis parameters -->
@@ -231,6 +266,8 @@
                 else if (selectedProject == "HDInsight")
                 {
                     <option value="wildfire-livy">wildfire-livy</option>
+                    <option value="wildfire-spark">wildfire-spark</option>
+                    <option value="wildfire-delta">wildfire-delta</option>
                 }
                 else if (selectedProject == "A365")
                 {
@@ -239,6 +276,11 @@
                     <option value="SparkRuntimeTSGs">SparkRuntimeTSGs</option>
                     <option value="marlin">marlin</option>
                     <option value="nebula">nebula</option>
+                    <option value="impulse">impulse</option>
+                    <option value="spark-driver-adonet">spark-driver-adonet</option>
+                    <option value="spark-driver-jdbc">spark-driver-jdbc</option>
+                    <option value="spark-driver-odbc">spark-driver-odbc</option>
+                    <option value="AIAgents">AIAgents</option>
                 }
             </select>
         </div>
@@ -248,6 +290,8 @@
             <select id="targetBranchSelect" class="form-select" @bind="selectedTargetBranch">
                 <option value="main" disabled="@(!IsMainBranchApplicable())">main</option>
                 <option value="master" disabled="@(!IsMasterBranchApplicable())">master</option>
+                <option value="release/3.2" disabled="@(!IsRelease32BranchApplicable())">release/3.2</option>
+                <option value="spark-3.5-mnt" disabled="@(!IsSpark35MntBranchApplicable())">spark-3.5-mnt</option>
             </select>
         </div>
 
@@ -393,11 +437,24 @@
         // Repositories that use "main" branch
         var mainBranchRepos = new[] { "workload-sparkcore", "workload-lakehouse", "workload-genericcomputemanager", 
                                       "workload-vpaas", "fabric-libraries", "fabric-spark-load-testing-suite", 
-                                      "SparkRuntimeTSGs", "nebula" };
+                                      "SparkRuntimeTSGs", "nebula", "impulse", "spark-driver-adonet", "spark-driver-jdbc", "spark-driver-odbc",
+                                      "AIAgents" };
         
         // Repositories that use "master" branch
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
                                         "BBC-VHD", "BBC-Probes", "marlin" };
+        
+        // wildfire-delta defaults to release/3.2 branch
+        if (selectedGitRepository == "wildfire-delta")
+        {
+            return "release/3.2";
+        }
+        
+        // wildfire-spark defaults to spark-3.5-mnt branch
+        if (selectedGitRepository == "wildfire-spark")
+        {
+            return "spark-3.5-mnt";
+        }
         
         if (mainBranchRepos.Contains(selectedGitRepository))
         {
@@ -415,7 +472,8 @@
     {
         var mainBranchRepos = new[] { "workload-sparkcore", "workload-lakehouse", "workload-genericcomputemanager", 
                                       "workload-vpaas", "fabric-libraries", "fabric-spark-load-testing-suite", 
-                                      "SparkRuntimeTSGs", "nebula" };
+                                      "SparkRuntimeTSGs", "nebula", "impulse", "spark-driver-adonet", "spark-driver-jdbc", "spark-driver-odbc",
+                                      "AIAgents" };
         return mainBranchRepos.Contains(selectedGitRepository);
     }
 
@@ -424,6 +482,18 @@
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
                                         "BBC-VHD", "BBC-Probes", "marlin" };
         return masterBranchRepos.Contains(selectedGitRepository);
+    }
+
+    private bool IsRelease32BranchApplicable()
+    {
+        // release/3.2 branch is only available for wildfire-delta repository
+        return selectedGitRepository == "wildfire-delta";
+    }
+
+    private bool IsSpark35MntBranchApplicable()
+    {
+        // spark-3.5-mnt branch is only available for wildfire-spark repository
+        return selectedGitRepository == "wildfire-spark";
     }
 
     private string GetAreaPathForTeam()
@@ -969,21 +1039,29 @@
             {
                 StateHasChanged(); // Show loading state
                 
-                string details;
-                if (selectedOption == "workItems")
+                try
                 {
-                    details = await GetWorkContributionDetails(contributorName);
+                    string details;
+                    if (selectedOption == "workItems")
+                    {
+                        details = await GetWorkContributionDetails(contributorName);
+                    }
+                    else if (selectedOption == "gitCommits")
+                    {
+                        details = await GetCodeContributionDetails(contributorName);
+                    }
+                    else // icmResolutions
+                    {
+                        details = await GetIncidentAttendanceDetails(contributorName);
+                    }
+                    
+                    contributorDetails[contributorName] = details;
                 }
-                else if (selectedOption == "gitCommits")
+                catch (Exception ex)
                 {
-                    details = await GetCodeContributionDetails(contributorName);
+                    Console.WriteLine($"Error loading details for {contributorName}: {ex.Message}");
+                    contributorDetails[contributorName] = $"<div class='text-danger p-3'><strong>Error loading details:</strong> {System.Web.HttpUtility.HtmlEncode(ex.Message)}</div>";
                 }
-                else // icmResolutions
-                {
-                    details = await GetIncidentAttendanceDetails(contributorName);
-                }
-                
-                contributorDetails[contributorName] = details;
                 StateHasChanged(); // Show loaded details
             }
         }
@@ -1779,6 +1857,7 @@
     private string selectedOrganization = "msdata";
     private string selectedProject = "A365";
     private string selectedOption = "workItems";
+    private string selectedView = "details";
     private string selectedTeam = "Cosmos on Azure Job Service";
     private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
     private string selectedGitRepository = "BBC-VHD";

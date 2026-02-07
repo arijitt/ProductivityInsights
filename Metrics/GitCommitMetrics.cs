@@ -787,9 +787,18 @@ namespace ProductivityInsights.Metrics
                             gitCommit.ChangedFilesCommitTypes[filePath] = CommitTypes.Unknown;
                         }
 
-                        gitCommit.ChangedFilesTotalLineCounts.Add(filePath, commitLineChangeDetailsMap[filePath][LineCountTypes.Total]);
-                        gitCommit.ChangedFilesEmptyLineCounts.Add(filePath, commitLineChangeDetailsMap[filePath][LineCountTypes.Empty]);
-                        gitCommit.ChangedFilesEffectiveLineCounts.Add(filePath, commitLineChangeDetailsMap[filePath][LineCountTypes.Effective]);
+                        if (commitLineChangeDetailsMap.TryGetValue(filePath, out var fileLineCounts))
+                        {
+                            gitCommit.ChangedFilesTotalLineCounts.Add(filePath, fileLineCounts.GetValueOrDefault(LineCountTypes.Total, 0));
+                            gitCommit.ChangedFilesEmptyLineCounts.Add(filePath, fileLineCounts.GetValueOrDefault(LineCountTypes.Empty, 0));
+                            gitCommit.ChangedFilesEffectiveLineCounts.Add(filePath, fileLineCounts.GetValueOrDefault(LineCountTypes.Effective, 0));
+                        }
+                        else
+                        {
+                            gitCommit.ChangedFilesTotalLineCounts.Add(filePath, 0);
+                            gitCommit.ChangedFilesEmptyLineCounts.Add(filePath, 0);
+                            gitCommit.ChangedFilesEffectiveLineCounts.Add(filePath, 0);
+                        }
 
                         /*
                         var (totalLineCount, emptyLineCount) = await GetFileLineStatisticsAsync(
