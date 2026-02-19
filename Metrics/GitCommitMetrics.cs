@@ -134,7 +134,8 @@ namespace ProductivityInsights.Metrics
             string? projectName,
             string? gitRepositoryName,
             string? branchName,
-            CommitCollection? commitCollection)
+            CommitCollection? commitCollection,
+            Func<string, int, int, Task>? progressCallback = null)
         {
             Dictionary<string, CommitDetailsCollection>? commitDetailsCollectionMap = new Dictionary<string, CommitDetailsCollection>();
 
@@ -157,14 +158,16 @@ namespace ProductivityInsights.Metrics
                    organizationName!,
                    gitRepository!,
                    branchName!,
-                   commitCollection);
+                   commitCollection,
+                   progressCallback);
 
                 commitChangeDetailsCollectionMap = await GitCommitMetrics.GetCommitChangeDetailsAsync(
                     accessToken,
                     organizationName!,
                     gitRepository!,
                     branchName!,
-                    commitCollection);
+                    commitCollection,
+                    progressCallback);
 
                 gitCommitCollection = await GitCommitMetrics.GetCommitLineChangeDetailsAsyc(
                     accessToken,
@@ -173,7 +176,8 @@ namespace ProductivityInsights.Metrics
                     branchName!,
                     commitCollection,
                     commitDetailsCollectionMap,
-                    commitChangeDetailsCollectionMap);
+                    commitChangeDetailsCollectionMap,
+                    progressCallback);
             }
 
             return gitCommitCollection;
@@ -259,7 +263,8 @@ namespace ProductivityInsights.Metrics
             string organizationName,
             GitRepository gitRepository,
             string branchName,
-            CommitCollection commitCollection)
+            CommitCollection commitCollection,
+            Func<string, int, int, Task>? progressCallback = null)
         {
             Dictionary<string, CommitDetailsCollection> commitDetailsMap = new Dictionary<string, CommitDetailsCollection>();
 
@@ -285,6 +290,11 @@ namespace ProductivityInsights.Metrics
             foreach (var commitSummary in commitCollection.value)
             {
                 commitCounter++;
+
+                if (progressCallback != null)
+                {
+                    await progressCallback("Retrieving commit details", commitCounter, totalCommits);
+                }
 
 #if DEBUG
                 Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
@@ -346,7 +356,8 @@ namespace ProductivityInsights.Metrics
             string organizationName,
             GitRepository gitRepository,
             string branchName,
-            CommitCollection commitCollection)
+            CommitCollection commitCollection,
+            Func<string, int, int, Task>? progressCallback = null)
         {
             Dictionary<string, CommitChangeCollection> commitChangeMap = new Dictionary<string, CommitChangeCollection>();
 
@@ -374,6 +385,11 @@ namespace ProductivityInsights.Metrics
                 try
                 {
                     commitCounter++;
+
+                    if (progressCallback != null)
+                    {
+                        await progressCallback("Retrieving file change details", commitCounter, totalCommits);
+                    }
 
 #if DEBUG
                     Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
@@ -441,7 +457,8 @@ namespace ProductivityInsights.Metrics
             string branchName,
             CommitCollection commitCollection,
             Dictionary<string, CommitDetailsCollection> commitDetailsCollectionMap,
-            Dictionary<string, CommitChangeCollection> commitChangeCollectionMap)
+            Dictionary<string, CommitChangeCollection> commitChangeCollectionMap,
+            Func<string, int, int, Task>? progressCallback = null)
         {
             Dictionary<string, Dictionary<LineCountTypes, int>> commitLineChangeDetailsMap = new Dictionary<string, Dictionary<LineCountTypes, int>>();
 
@@ -469,6 +486,11 @@ namespace ProductivityInsights.Metrics
             foreach (var commitSummary in commitCollection.value)
             {
                 commitCounter++;
+
+                if (progressCallback != null)
+                {
+                    await progressCallback("Calculating line changes", commitCounter, totalCommits);
+                }
 
 #if DEBUG
                 Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving line change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");

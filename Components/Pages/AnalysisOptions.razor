@@ -113,11 +113,18 @@
                     }
                     else if (selectedView == "trends")
                     {
-                        <div class="trends-placeholder">
-                            <div class="trends-icon">📈</div>
-                            <h4>Trend Graphs</h4>
-                            <p class="text-muted">Trend visualization coming soon...</p>
-                        </div>
+                        @if (selectedOption == "gitCommits")
+                        {
+                            @RenderGitCommitsTrendChart()
+                        }
+                        else
+                        {
+                            <div class="trends-placeholder">
+                                <div class="trends-icon">📈</div>
+                                <h4>Trend Graphs</h4>
+                                <p class="text-muted">@(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) trend visualization coming soon...</p>
+                            </div>
+                        }
                     }
                 </div>
             }
@@ -219,6 +226,30 @@
             </div>
         </div>
 
+        @if (selectedView == "trends")
+        {
+            <div class="datetime-group mb-4">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="datetime-input-wrapper">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendYearlyWI" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
+                                <label class="form-check-label" for="trendYearlyWI">Yearly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendMonthlyWI" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
+                                <label class="form-check-label" for="trendMonthlyWI">Monthly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendDailyWI" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
+                                <label class="form-check-label" for="trendDailyWI">Daily</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
         <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
             Run Analysis
         </button>
@@ -312,6 +343,30 @@
             </div>
         </div>
 
+        @if (selectedView == "trends")
+        {
+            <div class="datetime-group mb-4">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="datetime-input-wrapper">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendYearlyGC" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
+                                <label class="form-check-label" for="trendYearlyGC">Yearly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendMonthlyGC" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
+                                <label class="form-check-label" for="trendMonthlyGC">Monthly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendDailyGC" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
+                                <label class="form-check-label" for="trendDailyGC">Daily</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
         <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
             Run Analysis
         </button>
@@ -359,6 +414,30 @@
                 </div>
             </div>
         </div>
+
+        @if (selectedView == "trends")
+        {
+            <div class="datetime-group mb-4">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="datetime-input-wrapper">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendYearlyICM" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
+                                <label class="form-check-label" for="trendYearlyICM">Yearly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendMonthlyICM" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
+                                <label class="form-check-label" for="trendMonthlyICM">Monthly</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendDailyICM" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
+                                <label class="form-check-label" for="trendDailyICM">Daily</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
 
         <button class="btn btn-primary mt-3" @onclick="ProcessAnalysis">
             Run Analysis
@@ -604,6 +683,13 @@
         html.Append($"<tr><td class='fw-bold'>Start Date Time</td><td>{startDateTime?.ToString("yyyy-MM-dd HH:mm") ?? "Not set"}</td></tr>");
         html.Append($"<tr><td class='fw-bold'>End Date Time</td><td>{endDateTime?.ToString("yyyy-MM-dd HH:mm") ?? "Not set"}</td></tr>");
         
+        // Trend Interval (only for Trends view)
+        if (selectedView == "trends")
+        {
+            var trendLabel = char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1);
+            html.Append($"<tr><td class='fw-bold'>Trend Interval</td><td>{trendLabel}</td></tr>");
+        }
+        
         html.Append("</tbody></table>");
         html.Append("</div>");
         
@@ -666,10 +752,10 @@
         {
             isLoadingResults = true;
             contributors = new List<(string Name, string Summary)>();
-            analysisResultHtml = "gitCommits"; // Flag to render RenderGitCommitsResults with loading state
+            trendData = null;
+            analysisResultHtml = "gitCommits";
             StateHasChanged();
             
-            // Scroll to bottom to show loading indicator
             try
             {
                 await Task.Delay(100);
@@ -677,18 +763,77 @@
             }
             catch { /* Ignore scroll errors */ }
 
-            // Run the API call in background
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var results = await GetCommitCollection();
-                    await InvokeAsync(() =>
+                    if (selectedView == "trends")
                     {
-                        contributors = results;
-                        isLoadingResults = false;
-                        StateHasChanged();
-                    });
+                        CommitQueryOptions commitQueryOptions = GetCommitQueryOptions();
+
+                        commitCollection = await GitCommitMetrics.GetCommitsAsync(
+                            commitQueryOptions.OrganizationName,
+                            commitQueryOptions.ProjectName,
+                            commitQueryOptions.GitRepositoryName,
+                            commitQueryOptions.TargetBranchName,
+                            commitQueryOptions.StartDateTime ?? DateTime.UtcNow.AddDays(-30),
+                            commitQueryOptions.EndDateTime ?? DateTime.UtcNow);
+
+                        if (commitCollection?.value != null && commitCollection.value.Any())
+                        {
+                            await InvokeAsync(() =>
+                            {
+                                trendProgressTotal = commitCollection.value.Count;
+                                trendProgressCurrent = 0;
+                                trendProgressPhase = "Retrieving commit details";
+                                StateHasChanged();
+                            });
+
+                            var gitCommitCollection = await GitCommitMetrics.GetCommitLineDetailsAsync(
+                                commitQueryOptions.OrganizationName,
+                                commitQueryOptions.ProjectName,
+                                commitQueryOptions.GitRepositoryName,
+                                commitQueryOptions.TargetBranchName,
+                                commitCollection,
+                                async (phase, current, total) =>
+                                {
+                                    await InvokeAsync(() =>
+                                    {
+                                        trendProgressPhase = phase;
+                                        trendProgressCurrent = current;
+                                        trendProgressTotal = total;
+                                        StateHasChanged();
+                                    });
+                                });
+
+                            await InvokeAsync(() =>
+                            {
+                                trendData = BuildTrendData(gitCommitCollection!);
+                                trendProgressTotal = 0;
+                                isLoadingResults = false;
+                                StateHasChanged();
+                            });
+                        }
+                        else
+                        {
+                            await InvokeAsync(() =>
+                            {
+                                trendData = new List<CommitTrendDataPoint>();
+                                isLoadingResults = false;
+                                StateHasChanged();
+                            });
+                        }
+                    }
+                    else
+                    {
+                        var results = await GetCommitCollection();
+                        await InvokeAsync(() =>
+                        {
+                            contributors = results;
+                            isLoadingResults = false;
+                            StateHasChanged();
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1022,6 +1167,79 @@
                 </tbody>
             </table>
         </div>
+    };
+
+    private RenderFragment RenderGitCommitsTrendChart() => __builder =>
+    {
+        if (isLoadingResults)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div class="mt-3 fw-semibold">Loading trend data...</div>
+                @if (trendProgressTotal > 0)
+                {
+                    <div class="mt-2 text-muted">
+                        @trendProgressPhase: @trendProgressCurrent of @trendProgressTotal pull requests
+                    </div>
+                    <div class="progress mt-2 mx-auto" style="max-width: 400px; height: 8px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: @((int)(trendProgressCurrent * 100.0 / trendProgressTotal))%" 
+                             aria-valuenow="@trendProgressCurrent" 
+                             aria-valuemin="0" 
+                             aria-valuemax="@trendProgressTotal">
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (trendData == null || !trendData.Any())
+        {
+            <div class="trends-placeholder">
+                <div class="trends-icon">📈</div>
+                <h4>No Trend Data</h4>
+                <p class="text-muted">No commit data available for the selected criteria.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-bordered table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th colspan="4" class="text-center fw-bold table-title-header">
+                                Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                            </th>
+                        </tr>
+                        <tr>
+                            <th scope="col">Period</th>
+                            <th scope="col">Pull Requests</th>
+                            <th scope="col">Lines Added</th>
+                            <th scope="col">Lines Deleted</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var point in trendData)
+                        {
+                            <tr class="contributor-row">
+                                <td class="fw-normal">@point.Period</td>
+                                <td>@point.TotalCommits</td>
+                                <td><span class="text-success">+@point.TotalLinesAdded</span></td>
+                                <td><span class="text-danger">-@point.TotalLinesDeleted</span></td>
+                            </tr>
+                        }
+                        <tr class="fw-bold" style="border-top: 2px solid var(--bs-primary); background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(102, 16, 242, 0.05));">
+                            <td>Total</td>
+                            <td>@trendData.Sum(t => t.TotalCommits)</td>
+                            <td><span class="text-success">+@trendData.Sum(t => t.TotalLinesAdded)</span></td>
+                            <td><span class="text-danger">-@trendData.Sum(t => t.TotalLinesDeleted)</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        }
     };
 
     private async Task ToggleRow(string contributorName)
@@ -1880,6 +2098,7 @@
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
     private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
     private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
+    private string selectedTrendPeriod = "monthly";
     private DateTime? startDateTime = DateTime.Now.AddDays(-30);
     private DateTime? endDateTime = DateTime.Now;
     private string analysisParameters = string.Empty;
@@ -1888,7 +2107,54 @@
     private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
     private bool isLoadingResults = false;
     private Dictionary<string, string> contributorDetails = new Dictionary<string, string>();
+    private List<CommitTrendDataPoint>? trendData = null;
+    private string trendProgressPhase = "";
+    private int trendProgressCurrent = 0;
+    private int trendProgressTotal = 0;
     
     // Cache analysis results per tab
     private Dictionary<string, (List<(string Name, string Summary)> Contributors, Dictionary<string, string> Details, HashSet<string> ExpandedRows)> cachedResults = new Dictionary<string, (List<(string Name, string Summary)>, Dictionary<string, string>, HashSet<string>)>();
+
+    private List<CommitTrendDataPoint> BuildTrendData(GitCommitCollection gitCommitCollection)
+    {
+        if (gitCommitCollection?.Value == null || !gitCommitCollection.Value.Any())
+            return new List<CommitTrendDataPoint>();
+
+        IEnumerable<IGrouping<string, GitCommit>> grouped;
+
+        if (selectedTrendPeriod == "yearly")
+        {
+            grouped = gitCommitCollection.Value
+                .GroupBy(c => c.CommitterDate.ToString("yyyy"))
+                .OrderBy(g => g.Key);
+        }
+        else if (selectedTrendPeriod == "daily")
+        {
+            grouped = gitCommitCollection.Value
+                .GroupBy(c => c.CommitterDate.ToString("yyyy-MM-dd"))
+                .OrderBy(g => g.Key);
+        }
+        else
+        {
+            grouped = gitCommitCollection.Value
+                .GroupBy(c => c.CommitterDate.ToString("yyyy-MM"))
+                .OrderBy(g => g.Key);
+        }
+
+        return grouped.Select(g => new CommitTrendDataPoint
+        {
+            Period = g.Key,
+            TotalCommits = g.Count(),
+            TotalLinesAdded = g.Sum(c => c.AddedLines),
+            TotalLinesDeleted = g.Sum(c => c.DeletedLines)
+        }).ToList();
+    }
+
+    public class CommitTrendDataPoint
+    {
+        public string Period { get; set; } = "";
+        public int TotalCommits { get; set; }
+        public int TotalLinesAdded { get; set; }
+        public int TotalLinesDeleted { get; set; }
+    }
 }
