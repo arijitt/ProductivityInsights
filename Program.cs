@@ -1,5 +1,6 @@
 using ProductivityInsights.Components;
 using ProductivityInsights.Services;
+using Radzen;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,7 +8,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddScoped<ThemeService>();
+builder.Services.AddRadzenComponents();
+builder.Services.AddScoped<ProductivityInsights.Services.ThemeService>();
 
 var app = builder.Build();
 

@@ -10,6 +10,8 @@
 @using System.Security.Cryptography.X509Certificates
 @rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
+@inject ProductivityInsights.Services.ThemeService ThemeService
+@implements IDisposable
 
 <PageTitle>Productivity Overview</PageTitle>
 
@@ -88,7 +90,7 @@
 
             @if (!string.IsNullOrEmpty(analysisResultHtml))
             {
-                <div class="analysis-results mt-4">
+                <div class="analysis-results">
                     <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
                         <span aria-hidden="true">×</span>
                     </button>
@@ -158,7 +160,28 @@
 </div>
 
 @code {
-   
+
+    private string ChartGridLineColor => ThemeService.IsDarkMode ? "rgba(148,163,184,0.2)" : "rgba(0,0,0,0.15)";
+    private string ChartContainerBackground => ThemeService.IsDarkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(255, 255, 255, 0.35)";
+    private string ChartContainerBorder => ThemeService.IsDarkMode ? "1px solid rgba(148, 163, 184, 0.2)" : "1px solid var(--bs-border-color, #dee2e6)";
+    private bool chartThemeKey = false;
+
+    protected override void OnInitialized()
+    {
+        ThemeService.OnThemeChanged += OnThemeChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        chartThemeKey = !chartThemeKey;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ThemeService.OnThemeChanged -= OnThemeChanged;
+    }
+
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
         <div class="mb-4">
@@ -1205,40 +1228,92 @@
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table table-bordered table-sm mb-0">
-                    <thead>
-                        <tr>
-                            <th colspan="4" class="text-center fw-bold table-title-header">
-                                Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
-                            </th>
-                        </tr>
-                        <tr>
-                            <th scope="col">Period</th>
-                            <th scope="col">Pull Requests</th>
-                            <th scope="col">Lines Added</th>
-                            <th scope="col">Lines Deleted</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var point in trendData)
-                        {
-                            <tr class="contributor-row">
-                                <td class="fw-normal">@point.Period</td>
-                                <td>@point.TotalCommits</td>
-                                <td><span class="text-success">+@point.TotalLinesAdded</span></td>
-                                <td><span class="text-danger">-@point.TotalLinesDeleted</span></td>
+            <ul class="nav nav-tabs trend-sub-tabs shadow-sm" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fs-5 fw-bold @(selectedTrendTab == "table" ? "active" : "")"
+                            type="button"
+                            @onclick="SetTrendTabTable">
+                        📋 Table
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fs-5 fw-bold @(selectedTrendTab == "chart" ? "active" : "")"
+                            type="button"
+                            @onclick="SetTrendTabChart">
+                        📈 Chart
+                    </button>
+                </li>
+            </ul>
+
+            @if (selectedTrendTab == "table")
+            {
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th colspan="4" class="text-center fw-bold table-title-header">
+                                    Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                                </th>
                             </tr>
-                        }
-                        <tr class="fw-bold" style="border-top: 2px solid var(--bs-primary); background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(102, 16, 242, 0.05));">
-                            <td>Total</td>
-                            <td>@trendData.Sum(t => t.TotalCommits)</td>
-                            <td><span class="text-success">+@trendData.Sum(t => t.TotalLinesAdded)</span></td>
-                            <td><span class="text-danger">-@trendData.Sum(t => t.TotalLinesDeleted)</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                            <tr>
+                                <th scope="col">Period</th>
+                                <th scope="col">Pull Requests</th>
+                                <th scope="col">Lines Added</th>
+                                <th scope="col">Lines Deleted</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var point in trendData)
+                            {
+                                <tr class="contributor-row">
+                                    <td class="fw-normal">@point.Period</td>
+                                    <td>@point.TotalCommits</td>
+                                    <td><span class="text-success">+@point.TotalLinesAdded</span></td>
+                                    <td><span class="text-danger">-@point.TotalLinesDeleted</span></td>
+                                </tr>
+                            }
+                            <tr class="fw-bold" style="border-top: 2px solid var(--bs-primary); background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(102, 16, 242, 0.05));">
+                                <td>Total</td>
+                                <td>@trendData.Sum(t => t.TotalCommits)</td>
+                                <td><span class="text-success">+@trendData.Sum(t => t.TotalLinesAdded)</span></td>
+                                <td><span class="text-danger">-@trendData.Sum(t => t.TotalLinesDeleted)</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else if (selectedTrendTab == "chart")
+            {
+                <div class="table-responsive" style="border: @ChartContainerBorder; border-radius: 12px; overflow: hidden; background: @ChartContainerBackground; backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);">
+                    <table class="table table-bordered table-sm mb-0" style="border-bottom: none; border-radius: 0; background: transparent;">
+                        <thead>
+                            <tr>
+                                <th class="text-center fw-bold table-title-header">
+                                    Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                                </th>
+                            </tr>
+                        </thead>
+                    </table>
+                    <RadzenChart @key="chartThemeKey" Style="height: 400px; width: 100%; padding: 0.5rem;">
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalCommits" Title="Pull Requests">
+                            <RadzenMarkers MarkerType="MarkerType.Circle" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalLinesAdded" Title="Lines Added" Stroke="green">
+                            <RadzenMarkers MarkerType="MarkerType.Square" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalLinesDeleted" Title="Lines Deleted" Stroke="red">
+                            <RadzenMarkers MarkerType="MarkerType.Triangle" />
+                        </RadzenLineSeries>
+                        <RadzenCategoryAxis Stroke="@ChartGridLineColor" StrokeWidth="1">
+                            <RadzenGridLines Visible="true" Stroke="@ChartGridLineColor" StrokeWidth="1" />
+                        </RadzenCategoryAxis>
+                        <RadzenValueAxis Stroke="@ChartGridLineColor" StrokeWidth="1">
+                            <RadzenGridLines Visible="true" Stroke="@ChartGridLineColor" StrokeWidth="1" />
+                        </RadzenValueAxis>
+                        <RadzenLegend Position="LegendPosition.Bottom" />
+                    </RadzenChart>
+                </div>
+            }
         }
     };
 
@@ -2098,7 +2173,7 @@
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
     private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
     private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
-    private string selectedTrendPeriod = "monthly";
+    private string selectedTrendPeriod = "daily";
     private DateTime? startDateTime = DateTime.Now.AddDays(-30);
     private DateTime? endDateTime = DateTime.Now;
     private string analysisParameters = string.Empty;
@@ -2111,6 +2186,10 @@
     private string trendProgressPhase = "";
     private int trendProgressCurrent = 0;
     private int trendProgressTotal = 0;
+    private string selectedTrendTab = "table";
+
+    private void SetTrendTabTable() => selectedTrendTab = "table";
+    private void SetTrendTabChart() => selectedTrendTab = "chart";
     
     // Cache analysis results per tab
     private Dictionary<string, (List<(string Name, string Summary)> Contributors, Dictionary<string, string> Details, HashSet<string> ExpandedRows)> cachedResults = new Dictionary<string, (List<(string Name, string Summary)>, Dictionary<string, string>, HashSet<string>)>();
