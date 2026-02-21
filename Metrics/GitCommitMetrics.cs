@@ -57,20 +57,16 @@ namespace ProductivityInsights.Metrics
                                        "&api-version=7.0";
 
                 const int pageSize = 1000;
-                string? continuationToken = null;
+                int skip = 0;
                 List<CommitValue> allCommits = new List<CommitValue>();
 
 #if DEBUG
                 PrintUtilities.PrintSingleDashSeparator();
 #endif
 
-                do
+                while (true)
                 {
-                    string pageUrl = baseCommitsUrl + $"&$top={pageSize}";
-                    if (!string.IsNullOrEmpty(continuationToken))
-                    {
-                        pageUrl += "&continuationToken=" + Uri.EscapeDataString(continuationToken);
-                    }
+                    string pageUrl = baseCommitsUrl + $"&$top={pageSize}&$skip={skip}";
 
                     var httpResponse = await httpClient.GetAsync(pageUrl);
 
@@ -95,21 +91,15 @@ namespace ProductivityInsights.Metrics
                     if (commitCollectionPage?.value != null && commitCollectionPage.value.Any())
                     {
                         allCommits.AddRange(commitCollectionPage.value);
+                        skip += commitCollectionPage.value.Count;
                     }
 
-                    continuationToken = null;
-                    if (httpResponse.Headers.TryGetValues("x-ms-continuationtoken", out var continuationValues))
-                    {
-                        continuationToken = continuationValues.FirstOrDefault();
-                    }
-
-                    // Safety: if fewer results than page size are returned, assume no more pages
+                    // If fewer results than page size are returned, we've reached the last page
                     if (commitCollectionPage?.value == null || commitCollectionPage.value.Count < pageSize)
                     {
-                        continuationToken = null;
+                        break;
                     }
-
-                } while (!string.IsNullOrEmpty(continuationToken));
+                }
 
 #if DEBUG
                 Console.WriteLine($"📋 Found {allCommits.Count} total commits in the specified range");
