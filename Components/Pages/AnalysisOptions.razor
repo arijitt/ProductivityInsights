@@ -94,10 +94,10 @@
                     <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
                         <span aria-hidden="true">×</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-primary"
+                    <button class="btn btn-sm analysis-pdf-btn"
                             @onclick="DownloadAsPdf"
                             disabled="@isGeneratingPdf"
-                            style="position: absolute; top: 1rem; right: calc(3rem + 32px); z-index: 10;">
+                            style="position: absolute; top: 1rem; right: calc(3rem + 32px); z-index: 10; padding-bottom: 0.5rem; display: inline-flex; align-items: center; justify-content: center;">
                         @if (isGeneratingPdf)
                         {
                             <span class="spinner-border spinner-border-sm me-1" role="status"></span>
@@ -110,6 +110,7 @@
                     </button>
                     @if (selectedView == "details")
                     {
+                        <div style="margin-top: 2.5rem;">
                         @if (selectedOption == "gitCommits")
                         {
                             @RenderGitCommitsResults()
@@ -126,6 +127,7 @@
                         {
                             @((MarkupString)analysisResultHtml)
                         }
+                        </div>
                     }
                     else if (selectedView == "trends")
                     {
@@ -211,26 +213,29 @@
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
         <div class="mb-4">
-            <label for="organizationSelect" class="form-label">Organization Name</label>
-            <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
-                <option value="msdata">msdata</option>
-                <!--<option value="powerbi">powerbi</option>-->
-            </select>
-        </div>
-
-        <div class="mb-4">
-            <label for="projectSelect" class="form-label">Project Name</label>
-            <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
-                @if (selectedOrganization == "msdata")
-                {
-                    <option value="A365">A365</option>
-                    <!--<option value="HDInsight">HDInsight</option>-->
-                }
-                else if (selectedOrganization == "powerbi")
-                {
-                    <!--<option value="MWC">MWC</option>-->
-                }
-            </select>
+            <div class="row">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    <label for="organizationSelect" class="form-label">Organization Name</label>
+                    <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
+                        <option value="msdata">msdata</option>
+                        <!--<option value="powerbi">powerbi</option>-->
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="projectSelect" class="form-label">Project Name</label>
+                    <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
+                        @if (selectedOrganization == "msdata")
+                        {
+                            <option value="A365">A365</option>
+                            <!--<option value="HDInsight">HDInsight</option>-->
+                        }
+                        else if (selectedOrganization == "powerbi")
+                        {
+                            <!--<option value="MWC">MWC</option>-->
+                        }
+                    </select>
+                </div>
+            </div>
         </div>
 
         @if (selectedProject == "A365")
@@ -283,15 +288,15 @@
                         <div class="datetime-input-wrapper">
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendYearlyWI" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
-                                <label class="form-check-label" for="trendYearlyWI">Yearly</label>
+                                <label class="form-check-label" for="trendYearlyWI">🌍 Yearly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendMonthlyWI" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
-                                <label class="form-check-label" for="trendMonthlyWI">Monthly</label>
+                                <label class="form-check-label" for="trendMonthlyWI">📅 Monthly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalWI" id="trendDailyWI" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
-                                <label class="form-check-label" for="trendDailyWI">Daily</label>
+                                <label class="form-check-label" for="trendDailyWI">⏱️ Daily</label>
                             </div>
                         </div>
                     </div>
@@ -307,26 +312,29 @@
     private RenderFragment RenderGitCommitsForm() => __builder =>
     {
         <div class="mb-4">
-            <label for="organizationSelect" class="form-label">Organization Name</label>
-            <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
-                <option value="msdata">msdata</option>
-                <option value="powerbi">powerbi</option>
-            </select>
-        </div>
-
-        <div class="mb-4">
-            <label for="projectSelect" class="form-label">Project Name</label>
-            <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
-                @if (selectedOrganization == "msdata")
-                {
-                    <option value="A365">A365</option>
-                    <option value="HDInsight">HDInsight</option>
-                }
-                else if (selectedOrganization == "powerbi")
-                {
-                    <option value="MWC">MWC</option>
-                }
-            </select>
+            <div class="row">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    <label for="organizationSelect" class="form-label">Organization Name</label>
+                    <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
+                        <option value="msdata">msdata</option>
+                        <option value="powerbi">powerbi</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="projectSelect" class="form-label">Project Name</label>
+                    <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
+                        @if (selectedOrganization == "msdata")
+                        {
+                            <option value="A365">A365</option>
+                            <option value="HDInsight">HDInsight</option>
+                        }
+                        else if (selectedOrganization == "powerbi")
+                        {
+                            <option value="MWC">MWC</option>
+                        }
+                    </select>
+                </div>
+            </div>
         </div>
 
         <div class="mb-4">
@@ -400,15 +408,15 @@
                         <div class="datetime-input-wrapper">
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendYearlyGC" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
-                                <label class="form-check-label" for="trendYearlyGC">Yearly</label>
+                                <label class="form-check-label" for="trendYearlyGC">🌍 Yearly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendMonthlyGC" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
-                                <label class="form-check-label" for="trendMonthlyGC">Monthly</label>
+                                <label class="form-check-label" for="trendMonthlyGC">📅 Monthly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalGC" id="trendDailyGC" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
-                                <label class="form-check-label" for="trendDailyGC">Daily</label>
+                                <label class="form-check-label" for="trendDailyGC">⏱️ Daily</label>
                             </div>
                         </div>
                     </div>
@@ -472,15 +480,15 @@
                         <div class="datetime-input-wrapper">
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendYearlyICM" value="yearly" checked="@(selectedTrendPeriod == "yearly")" @onchange="@(() => selectedTrendPeriod = "yearly")" />
-                                <label class="form-check-label" for="trendYearlyICM">Yearly</label>
+                                <label class="form-check-label" for="trendYearlyICM">🌍 Yearly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendMonthlyICM" value="monthly" checked="@(selectedTrendPeriod == "monthly")" @onchange="@(() => selectedTrendPeriod = "monthly")" />
-                                <label class="form-check-label" for="trendMonthlyICM">Monthly</label>
+                                <label class="form-check-label" for="trendMonthlyICM">📅 Monthly</label>
                             </div>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input" type="radio" name="trendIntervalICM" id="trendDailyICM" value="daily" checked="@(selectedTrendPeriod == "daily")" @onchange="@(() => selectedTrendPeriod = "daily")" />
-                                <label class="form-check-label" for="trendDailyICM">Daily</label>
+                                <label class="form-check-label" for="trendDailyICM">⏱️ Daily</label>
                             </div>
                         </div>
                     </div>
@@ -1282,7 +1290,7 @@
                                 </th>
                             </tr>
                             <tr>
-                                <th scope="col">Period</th>
+                                <th scope="col" style="white-space: nowrap;">Period</th>
                                 <th scope="col">Pull Requests</th>
                                 <th scope="col">Service Lines Added</th>
                                 <th scope="col">Service Lines Deleted</th>
@@ -1297,7 +1305,7 @@
                             @foreach (var point in trendData)
                             {
                                 <tr class="contributor-row">
-                                    <td class="fw-normal">@point.Period</td>
+                                    <td class="fw-normal" style="white-space: nowrap;">@point.Period</td>
                                     <td>@point.TotalCommits</td>
                                     <td><span class="text-success">+@point.ServiceLinesAdded</span></td>
                                     <td><span class="text-danger">-@point.ServiceLinesDeleted</span></td>
@@ -1355,7 +1363,7 @@
                         <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TestLinesDeleted" Title="Test Lines Deleted" Stroke="orangered">
                             <RadzenMarkers MarkerType="MarkerType.Diamond" />
                         </RadzenLineSeries>
-                        <RadzenCategoryAxis Stroke="@ChartGridLineColor" StrokeWidth="1">
+                        <RadzenCategoryAxis Stroke="@ChartGridLineColor" StrokeWidth="1" Formatter="@FormatCategoryAxisLabel">
                             <RadzenGridLines Visible="true" Stroke="@ChartGridLineColor" StrokeWidth="1" />
                         </RadzenCategoryAxis>
                         <RadzenValueAxis Stroke="@ChartGridLineColor" StrokeWidth="1">
@@ -2299,6 +2307,14 @@
 
     private void SetTrendTabTable() => selectedTrendTab = "table";
     private void SetTrendTabChart() => selectedTrendTab = "chart";
+
+    private Func<object, string> FormatCategoryAxisLabel => (value) =>
+    {
+        if (trendData == null || trendData.Count == 0) return value?.ToString() ?? "";
+        var label = value?.ToString() ?? "";
+        var index = trendData.FindIndex(d => d.Period == label);
+        return (index >= 0 && index % 5 == 0) ? label : " ";
+    };
     
     // Cache analysis results per tab
     private Dictionary<string, (List<(string Name, string Summary)> Contributors, Dictionary<string, string> Details, HashSet<string> ExpandedRows)> cachedResults = new Dictionary<string, (List<(string Name, string Summary)>, Dictionary<string, string>, HashSet<string>)>();

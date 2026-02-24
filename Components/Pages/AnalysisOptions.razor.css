@@ -15,7 +15,7 @@
     margin-top: 5rem;
     margin-right: 0;
     margin-bottom: 0;
-    background: rgba(248, 249, 250, 0.5);
+    background: transparent;
     border-radius: 12px 12px 12px 12px !important;
     overflow: hidden;
     align-self: stretch;
@@ -45,8 +45,7 @@
 }
 
 .nav-tabs-vertical .nav-link.active {
-    background-color: rgba(13, 110, 253, 0.1);
-    color: #0d6efd;
+    background-color: #dee2e6;
     font-weight: 600;
 }
 
@@ -55,7 +54,6 @@
 }
 
 .nav-tabs-vertical .nav-item:last-child .nav-link {
-    border-bottom: none;
     border-radius: 10px !important;
 }
 
@@ -113,7 +111,7 @@
 /* Dark mode vertical tabs */
 [data-bs-theme="dark"] .nav-tabs-vertical {
     border-color: #495057;
-    background: rgba(30, 41, 59, 0.5);
+    background: transparent;
 }
 
 [data-bs-theme="dark"] .nav-tabs-vertical .nav-link {
@@ -121,8 +119,7 @@
 }
 
 [data-bs-theme="dark"] .nav-tabs-vertical .nav-link.active {
-    background-color: rgba(110, 168, 254, 0.15);
-    color: #6ea8fe;
+    background-color: var(--bs-nav-tabs-link-active-bg, #43434F);
 }
 
 [data-bs-theme="dark"] .nav-tabs-vertical .nav-link:hover:not(.active) {
@@ -343,7 +340,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     gap: 0.5rem;
 }
 
-.datetime-group label::before {
+.datetime-group label.form-label::before {
     content: "📅";
     font-size: 1.2rem;
 }
@@ -512,6 +509,21 @@ select.form-select:hover {
     border-radius: 12px;
     box-shadow: 0 16px 36px rgba(31, 38, 135, 0.22);
     position: relative;
+}
+
+.analysis-pdf-btn {
+    background: rgba(13, 110, 253, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(13, 110, 253, 0.3);
+    color: #0d6efd;
+    transition: all 0.3s ease;
+}
+
+.analysis-pdf-btn:hover {
+    background: rgba(13, 110, 253, 0.3);
+    border-color: rgba(13, 110, 253, 0.5);
+    color: #0d6efd;
 }
 
 .analysis-close-btn {
