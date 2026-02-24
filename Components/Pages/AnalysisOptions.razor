@@ -1251,15 +1251,20 @@
                     <table class="table table-bordered table-sm mb-0">
                         <thead>
                             <tr>
-                                <th colspan="4" class="text-center fw-bold table-title-header">
+                                <th colspan="9" class="text-center fw-bold table-title-header">
                                     Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
                                 </th>
                             </tr>
                             <tr>
                                 <th scope="col">Period</th>
                                 <th scope="col">Pull Requests</th>
-                                <th scope="col">Lines Added</th>
-                                <th scope="col">Lines Deleted</th>
+                                <th scope="col">Service Lines Added</th>
+                                <th scope="col">Service Lines Deleted</th>
+                                <th scope="col">Test Lines Added</th>
+                                <th scope="col">Test Lines Deleted</th>
+                                <th scope="col">Total Lines Added</th>
+                                <th scope="col">Total Lines Deleted</th>
+                                <th scope="col">Service/Test Ratio</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1268,15 +1273,29 @@
                                 <tr class="contributor-row">
                                     <td class="fw-normal">@point.Period</td>
                                     <td>@point.TotalCommits</td>
+                                    <td><span class="text-success">+@point.ServiceLinesAdded</span></td>
+                                    <td><span class="text-danger">-@point.ServiceLinesDeleted</span></td>
+                                    <td><span class="text-success">+@point.TestLinesAdded</span></td>
+                                    <td><span class="text-danger">-@point.TestLinesDeleted</span></td>
                                     <td><span class="text-success">+@point.TotalLinesAdded</span></td>
                                     <td><span class="text-danger">-@point.TotalLinesDeleted</span></td>
+                                    <td>@FormatServiceTestRatio(
+                                        point.ServiceLinesAdded + point.ServiceLinesDeleted,
+                                        point.TestLinesAdded + point.TestLinesDeleted)</td>
                                 </tr>
                             }
                             <tr class="fw-bold" style="border-top: 2px solid var(--bs-primary); background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(102, 16, 242, 0.05));">
                                 <td>Total</td>
                                 <td>@trendData.Sum(t => t.TotalCommits)</td>
+                                <td><span class="text-success">+@trendData.Sum(t => t.ServiceLinesAdded)</span></td>
+                                <td><span class="text-danger">-@trendData.Sum(t => t.ServiceLinesDeleted)</span></td>
+                                <td><span class="text-success">+@trendData.Sum(t => t.TestLinesAdded)</span></td>
+                                <td><span class="text-danger">-@trendData.Sum(t => t.TestLinesDeleted)</span></td>
                                 <td><span class="text-success">+@trendData.Sum(t => t.TotalLinesAdded)</span></td>
                                 <td><span class="text-danger">-@trendData.Sum(t => t.TotalLinesDeleted)</span></td>
+                                <td>@FormatServiceTestRatio(
+                                    trendData.Sum(t => t.ServiceLinesAdded + t.ServiceLinesDeleted),
+                                    trendData.Sum(t => t.TestLinesAdded + t.TestLinesDeleted))</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1298,11 +1317,17 @@
                         <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalCommits" Title="Pull Requests">
                             <RadzenMarkers MarkerType="MarkerType.Circle" />
                         </RadzenLineSeries>
-                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalLinesAdded" Title="Lines Added" Stroke="green">
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="ServiceLinesAdded" Title="Service Lines Added" Stroke="green">
                             <RadzenMarkers MarkerType="MarkerType.Square" />
                         </RadzenLineSeries>
-                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TotalLinesDeleted" Title="Lines Deleted" Stroke="red">
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="ServiceLinesDeleted" Title="Service Lines Deleted" Stroke="red">
                             <RadzenMarkers MarkerType="MarkerType.Triangle" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TestLinesAdded" Title="Test Lines Added" Stroke="limegreen">
+                            <RadzenMarkers MarkerType="MarkerType.Diamond" />
+                        </RadzenLineSeries>
+                        <RadzenLineSeries Smooth="true" Data="@trendData" CategoryProperty="Period" ValueProperty="TestLinesDeleted" Title="Test Lines Deleted" Stroke="orangered">
+                            <RadzenMarkers MarkerType="MarkerType.Diamond" />
                         </RadzenLineSeries>
                         <RadzenCategoryAxis Stroke="@ChartGridLineColor" StrokeWidth="1">
                             <RadzenGridLines Visible="true" Stroke="@ChartGridLineColor" StrokeWidth="1" />
@@ -2199,23 +2224,36 @@
         if (gitCommitCollection?.Value == null || !gitCommitCollection.Value.Any())
             return new List<CommitTrendDataPoint>();
 
+        // Defensively deduplicate commits before aggregation.
+        var uniqueCommits = gitCommitCollection.Value
+            .GroupBy(c => string.IsNullOrWhiteSpace(c.CommitId)
+                ? $"NO_ID|{c.CommitterDate:O}|{c.AuthorEmail}|{c.CommitterEmail}|{c.Comment}"
+                : c.CommitId,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+
+#if DEBUG
+        Console.WriteLine($"📈 Trend input commits: raw={gitCommitCollection.Value.Count}, unique={uniqueCommits.Count}");
+#endif
+
         IEnumerable<IGrouping<string, GitCommit>> grouped;
 
         if (selectedTrendPeriod == "yearly")
         {
-            grouped = gitCommitCollection.Value
+            grouped = uniqueCommits
                 .GroupBy(c => c.CommitterDate.ToString("yyyy"))
                 .OrderBy(g => g.Key);
         }
         else if (selectedTrendPeriod == "daily")
         {
-            grouped = gitCommitCollection.Value
+            grouped = uniqueCommits
                 .GroupBy(c => c.CommitterDate.ToString("yyyy-MM-dd"))
                 .OrderBy(g => g.Key);
         }
         else
         {
-            grouped = gitCommitCollection.Value
+            grouped = uniqueCommits
                 .GroupBy(c => c.CommitterDate.ToString("yyyy-MM"))
                 .OrderBy(g => g.Key);
         }
@@ -2225,8 +2263,51 @@
             Period = g.Key,
             TotalCommits = g.Count(),
             TotalLinesAdded = g.Sum(c => c.AddedLines),
-            TotalLinesDeleted = g.Sum(c => c.DeletedLines)
+            TotalLinesDeleted = g.Sum(c => c.DeletedLines),
+            ServiceLinesAdded = g.Sum(c => GetServiceLinesAdded(c)),
+            ServiceLinesDeleted = g.Sum(c => GetServiceLinesDeleted(c)),
+            TestLinesAdded = g.Sum(c => GetTestLinesAdded(c)),
+            TestLinesDeleted = g.Sum(c => GetTestLinesDeleted(c))
         }).ToList();
+    }
+
+    private static bool IsTestFile(string filePath) =>
+        filePath.IndexOf("test", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static int GetTestLinesAdded(GitCommit c) =>
+        c.ChangedFilesAddedLineCounts?
+            .Where(kvp => IsTestFile(kvp.Key))
+            .Sum(kvp => kvp.Value) ?? 0;
+
+    private static int GetTestLinesDeleted(GitCommit c) =>
+        c.ChangedFilesDeletedLineCounts?
+            .Where(kvp => IsTestFile(kvp.Key))
+            .Sum(kvp => kvp.Value) ?? 0;
+
+    private static int GetServiceLinesAdded(GitCommit c) =>
+        c.ChangedFilesAddedLineCounts?
+            .Where(kvp => !IsTestFile(kvp.Key))
+            .Sum(kvp => kvp.Value) ?? 0;
+
+    private static int GetServiceLinesDeleted(GitCommit c) =>
+        c.ChangedFilesDeletedLineCounts?
+            .Where(kvp => !IsTestFile(kvp.Key))
+            .Sum(kvp => kvp.Value) ?? 0;
+
+    private static string FormatServiceTestRatio(int serviceLines, int testLines)
+    {
+        if (serviceLines == 0 && testLines == 0)
+        {
+            return "0:0";
+        }
+
+        if (testLines == 0)
+        {
+            return "Inf";
+        }
+
+        double ratio = (double)serviceLines / testLines;
+        return $"{ratio:F2}:1";
     }
 
     public class CommitTrendDataPoint
@@ -2235,5 +2316,9 @@
         public int TotalCommits { get; set; }
         public int TotalLinesAdded { get; set; }
         public int TotalLinesDeleted { get; set; }
+        public int ServiceLinesAdded { get; set; }
+        public int ServiceLinesDeleted { get; set; }
+        public int TestLinesAdded { get; set; }
+        public int TestLinesDeleted { get; set; }
     }
 }

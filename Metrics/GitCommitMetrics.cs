@@ -2,13 +2,73 @@
 using ProductivityInsights.Models;
 using ProductivityInsights.Models.CommitChanges;
 using ProductivityInsights.Utilities;
+using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Polly.Contrib.WaitAndRetry;
 
 namespace ProductivityInsights.Metrics
 {
     public class GitCommitMetrics
     {
+        private static async Task<HttpResponseMessage> SendWithRetryAsync(
+            Func<Task<HttpResponseMessage>> sendRequest,
+            int maxRetries = 5)
+        {
+            var jitterDelays = Backoff.DecorrelatedJitterBackoffV2(
+                medianFirstRetryDelay: TimeSpan.FromSeconds(5),
+                retryCount: maxRetries).ToArray();
+
+            HttpResponseMessage response = null!;
+
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
+            {
+                response = await sendRequest();
+
+                if (response.StatusCode != HttpStatusCode.TooManyRequests)
+                {
+                    return response;
+                }
+
+                if (attempt == maxRetries)
+                {
+                    break;
+                }
+
+                TimeSpan delay;
+
+                if (response.Headers.RetryAfter != null)
+                {
+                    if (response.Headers.RetryAfter.Delta.HasValue)
+                    {
+                        delay = response.Headers.RetryAfter.Delta.Value;
+                    }
+                    else if (response.Headers.RetryAfter.Date.HasValue)
+                    {
+                        delay = response.Headers.RetryAfter.Date.Value - DateTimeOffset.UtcNow;
+                        if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
+                    }
+                    else
+                    {
+                        delay = jitterDelays[attempt];
+                    }
+                }
+                else
+                {
+                    delay = jitterDelays[attempt];
+                }
+
+#if DEBUG
+                Console.WriteLine($"\u26a0\ufe0f  429 Too Many Requests — retrying in {delay.TotalSeconds:F1}s (attempt {attempt + 1}/{maxRetries})");
+#endif
+
+                await Task.Delay(delay);
+            }
+
+            return response;
+        }
+
         /// <summary>
         /// Retrieves a collection of commits that were merged into the specified branch within the given date range
         /// from an Azure DevOps Git repository.
@@ -59,6 +119,8 @@ namespace ProductivityInsights.Metrics
                 const int pageSize = 1000;
                 int skip = 0;
                 List<CommitValue> allCommits = new List<CommitValue>();
+                HashSet<string> seenCommitIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int duplicateCommitsSkipped = 0;
 
 #if DEBUG
                 PrintUtilities.PrintSingleDashSeparator();
@@ -68,7 +130,7 @@ namespace ProductivityInsights.Metrics
                 {
                     string pageUrl = baseCommitsUrl + $"&$top={pageSize}&$skip={skip}";
 
-                    var httpResponse = await httpClient.GetAsync(pageUrl);
+                    var httpResponse = await SendWithRetryAsync(() => httpClient.GetAsync(pageUrl));
 
                     if (!httpResponse.IsSuccessStatusCode)
                     {
@@ -90,7 +152,24 @@ namespace ProductivityInsights.Metrics
 
                     if (commitCollectionPage?.value != null && commitCollectionPage.value.Any())
                     {
-                        allCommits.AddRange(commitCollectionPage.value);
+                        foreach (var commit in commitCollectionPage.value)
+                        {
+                            if (string.IsNullOrWhiteSpace(commit.commitId))
+                            {
+                                allCommits.Add(commit);
+                                continue;
+                            }
+
+                            if (seenCommitIds.Add(commit.commitId))
+                            {
+                                allCommits.Add(commit);
+                            }
+                            else
+                            {
+                                duplicateCommitsSkipped++;
+                            }
+                        }
+
                         skip += commitCollectionPage.value.Count;
                     }
 
@@ -103,6 +182,7 @@ namespace ProductivityInsights.Metrics
 
 #if DEBUG
                 Console.WriteLine($"📋 Found {allCommits.Count} total commits in the specified range");
+                Console.WriteLine($"📋 Skipped {duplicateCommitsSkipped} duplicate commits by commitId");
                 PrintUtilities.PrintSingleDashSeparator();
 #endif
 
@@ -119,6 +199,7 @@ namespace ProductivityInsights.Metrics
             }
         }
 
+       
         public static async Task<GitCommitCollection?> GetCommitLineDetailsAsync(
             string? organizationName,
             string? projectName,
@@ -204,7 +285,7 @@ namespace ProductivityInsights.Metrics
                 Console.WriteLine($"🔗 Connecting to Git repository '{gitRepositoryName}' in project '{projectName}'...");
 #endif
 
-                var httpResponse = await httpClient.GetAsync(repositoryUrl);
+                var httpResponse = await SendWithRetryAsync(() => httpClient.GetAsync(repositoryUrl));
 
 #if DEBUG
                 Console.WriteLine($"Git Repository API Response Status: {httpResponse.StatusCode}");
@@ -256,18 +337,20 @@ namespace ProductivityInsights.Metrics
             CommitCollection commitCollection,
             Func<string, int, int, Task>? progressCallback = null)
         {
-            Dictionary<string, CommitDetailsCollection> commitDetailsMap = new Dictionary<string, CommitDetailsCollection>();
+            var commitDetailsMap = new ConcurrentDictionary<string, CommitDetailsCollection>();
 
             if (commitCollection == null || commitCollection.value == null)
             {
-                return commitDetailsMap;
+                return new Dictionary<string, CommitDetailsCollection>();
             }
 
-            int commitCounter = 0;
+            int processedCount = 0;
             int totalCommits = commitCollection.value.Count;
 
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+
+            var semaphore = new SemaphoreSlim(8);
 
 #if DEBUG
             PrintUtilities.PrintDoubleDashSeparator();
@@ -277,52 +360,54 @@ namespace ProductivityInsights.Metrics
             PrintUtilities.PrintSingleDashSeparator();
 #endif
 
-            foreach (var commitSummary in commitCollection.value)
+            var tasks = commitCollection.value.Select(async commitSummary =>
             {
-                commitCounter++;
-
-                if (progressCallback != null)
-                {
-                    await progressCallback("Retrieving commit details", commitCounter, totalCommits);
-                }
-
-#if DEBUG
-                Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
-#endif
-
+                await semaphore.WaitAsync();
                 try
                 {
-                    List<string> parentCommitIdList = new List<string>();
+                    int current = Interlocked.Increment(ref processedCount);
 
-                    // Get detailed commit information including parents
-                    string commitUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project!.name}/_apis/git/repositories/{gitRepository.name}/commits/{commitSummary.commitId}?api-version=7.0";
-
-                    var commitResponse = await httpClient.GetAsync(commitUrl);
-                    if (commitResponse.IsSuccessStatusCode)
+                    if (progressCallback != null)
                     {
-                        string commitDetailsContent = await commitResponse.Content.ReadAsStringAsync();
-                        var commitDetails = JsonSerializer.Deserialize<CommitDetailsCollection>(commitDetailsContent);
-
-                        commitDetailsMap.Add(commitSummary.commitId!, commitDetails!);
-
-                        // Determine if this is a merge commit (has multiple parents)
-                        //commit.IsMergeCommit = commit.ParentCommitIds.Count > 1;
+                        await progressCallback("Retrieving commit details", current, totalCommits);
                     }
 
 #if DEBUG
-                    PrintUtilities.PrintSingleDashSeparator();
+                    Console.WriteLine($"[{current}/{totalCommits}] Retrieving details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
 #endif
 
-                    // Small delay to avoid rate limiting
-                    await Task.Delay(50);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"⚠️  Warning: Could not get parent IDs for commit {commitSummary.commitId?[..8]}: {e.Message}");
-                }
-            }
+                    try
+                    {
+                        // Get detailed commit information including parents
+                        string commitUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project!.name}/_apis/git/repositories/{gitRepository.name}/commits/{commitSummary.commitId}?api-version=7.0";
 
-            return commitDetailsMap;
+                        var commitResponse = await SendWithRetryAsync(() => httpClient.GetAsync(commitUrl));
+                        if (commitResponse.IsSuccessStatusCode)
+                        {
+                            string commitDetailsContent = await commitResponse.Content.ReadAsStringAsync();
+                            var commitDetails = JsonSerializer.Deserialize<CommitDetailsCollection>(commitDetailsContent);
+
+                            commitDetailsMap.TryAdd(commitSummary.commitId!, commitDetails!);
+                        }
+
+#if DEBUG
+                        PrintUtilities.PrintSingleDashSeparator();
+#endif
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"⚠️  Warning: Could not get parent IDs for commit {commitSummary.commitId?[..8]}: {e.Message}");
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            return new Dictionary<string, CommitDetailsCollection>(commitDetailsMap);
         }
 
         /// <summary>
@@ -349,18 +434,20 @@ namespace ProductivityInsights.Metrics
             CommitCollection commitCollection,
             Func<string, int, int, Task>? progressCallback = null)
         {
-            Dictionary<string, CommitChangeCollection> commitChangeMap = new Dictionary<string, CommitChangeCollection>();
+            var commitChangeMap = new ConcurrentDictionary<string, CommitChangeCollection>();
 
             if (commitCollection == null || commitCollection.value == null)
             {
-                return commitChangeMap;
+                return new Dictionary<string, CommitChangeCollection>();
             }
 
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
 
-            int commitCounter = 0;
+            int processedCount = 0;
             int totalCommits = commitCollection.value.Count;
+
+            var semaphore = new SemaphoreSlim(8);
 
 #if DEBUG
             PrintUtilities.PrintDoubleDashSeparator();
@@ -370,55 +457,62 @@ namespace ProductivityInsights.Metrics
             PrintUtilities.PrintSingleDashSeparator();
 #endif
 
-            foreach (var commitSummary in commitCollection.value)
+            var tasks = commitCollection.value.Select(async commitSummary =>
             {
+                await semaphore.WaitAsync();
                 try
                 {
-                    commitCounter++;
+                    int current = Interlocked.Increment(ref processedCount);
 
                     if (progressCallback != null)
                     {
-                        await progressCallback("Retrieving file change details", commitCounter, totalCommits);
+                        await progressCallback("Retrieving file change details", current, totalCommits);
                     }
 
 #if DEBUG
-                    Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
+                    Console.WriteLine($"[{current}/{totalCommits}] Retrieving change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
 #endif
 
-                    // Get commit changes with file-level statistics
-                    string changesUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project.name}/_apis/git/repositories/{gitRepository.name}/commits/{commitSummary.commitId}/changes?api-version=7.0";
-
-                    var changesResponse = await httpClient.GetAsync(changesUrl);
-                    if (changesResponse.IsSuccessStatusCode)
+                    try
                     {
-                        string changesContent = await changesResponse.Content.ReadAsStringAsync();
-                        var commitChanges = JsonSerializer.Deserialize<CommitChangeCollection>(changesContent);
+                        // Get commit changes with file-level statistics
+                        string changesUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project!.name}/_apis/git/repositories/{gitRepository.name}/commits/{commitSummary.commitId}/changes?api-version=7.0";
 
-                        // Filter out folder items from the changes collection
-                        if (commitChanges?.changes != null)
+                        var changesResponse = await SendWithRetryAsync(() => httpClient.GetAsync(changesUrl));
+                        if (changesResponse.IsSuccessStatusCode)
                         {
-                            commitChanges.changes = commitChanges.changes
-                                .Where(change => !(change?.item?.isFolder ?? false))
-                                .ToList();
+                            string changesContent = await changesResponse.Content.ReadAsStringAsync();
+                            var commitChanges = JsonSerializer.Deserialize<CommitChangeCollection>(changesContent);
 
-                            commitChangeMap.Add(commitSummary.commitId!, commitChanges);
+                            // Filter out folder items from the changes collection
+                            if (commitChanges?.changes != null)
+                            {
+                                commitChanges.changes = commitChanges.changes
+                                    .Where(change => !(change?.item?.isFolder ?? false))
+                                    .ToList();
+
+                                commitChangeMap.TryAdd(commitSummary.commitId!, commitChanges);
+                            }
                         }
-                    }
 
 #if DEBUG
-                    PrintUtilities.PrintSingleDashSeparator();
+                        PrintUtilities.PrintSingleDashSeparator();
 #endif
-
-                    // Small delay to avoid rate limiting
-                    await Task.Delay(50);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️  Warning: Could not get details for commit {commitSummary.commitId}: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    Console.WriteLine($"⚠️  Warning: Could not get details for commit {commitSummary.commitId}: {ex.Message}");
+                    semaphore.Release();
                 }
-            }
+            });
 
-            return commitChangeMap;
+            await Task.WhenAll(tasks);
+
+            return new Dictionary<string, CommitChangeCollection>(commitChangeMap);
         }
 
         /// <summary>
@@ -450,8 +544,6 @@ namespace ProductivityInsights.Metrics
             Dictionary<string, CommitChangeCollection> commitChangeCollectionMap,
             Func<string, int, int, Task>? progressCallback = null)
         {
-            Dictionary<string, Dictionary<LineCountTypes, int>> commitLineChangeDetailsMap = new Dictionary<string, Dictionary<LineCountTypes, int>>();
-
             GitCommitCollection gitCommitCollection = new GitCommitCollection();
 
             if (commitCollection == null || commitCollection.value == null)
@@ -459,11 +551,10 @@ namespace ProductivityInsights.Metrics
                 return gitCommitCollection;
             }
 
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
-
-            int commitCounter = 0;
+            int processedCount = 0;
             int totalCommits = commitCollection.value.Count;
+            var resultBag = new ConcurrentBag<GitCommit>();
+            var semaphore = new SemaphoreSlim(8);
 
 #if DEBUG
             PrintUtilities.PrintDoubleDashSeparator();
@@ -473,148 +564,158 @@ namespace ProductivityInsights.Metrics
             PrintUtilities.PrintSingleDashSeparator();
 #endif
 
-            foreach (var commitSummary in commitCollection.value)
+            var tasks = commitCollection.value.Select(async commitSummary =>
             {
-                commitCounter++;
-
-                if (progressCallback != null)
-                {
-                    await progressCallback("Calculating line changes", commitCounter, totalCommits);
-                }
-
-#if DEBUG
-                Console.WriteLine($"[{commitCounter}/{totalCommits}] Retrieving line change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
-#endif
-
-                if (!commitDetailsCollectionMap.TryGetValue(commitSummary.commitId!, out var commitDetails))
-                {
-#if DEBUG
-                    Console.WriteLine($"⚠️  Warning: Could not find details for commit {commitSummary.commitId?[..8]}");
-#endif
-
-                    continue;
-                }
-
-                if (!commitChangeCollectionMap.TryGetValue(commitSummary.commitId!, out var commitChanges))
-                {
-
-#if DEBUG
-                    Console.WriteLine($"⚠️  Warning: Could not find changes for commit {commitSummary.commitId?[..8]}");
-#endif
-
-                    continue;
-                }
-
+                await semaphore.WaitAsync();
                 try
                 {
-                    // Use the first parent for comparison (for merge commits, this compares against the main branch)
-                    string parentCommitId = commitDetails.parents?.FirstOrDefault() ?? string.Empty;
+                    int current = Interlocked.Increment(ref processedCount);
 
-                    if (string.IsNullOrEmpty(parentCommitId))
+                    if (progressCallback != null)
                     {
-
-#if DEBUG
-                        Console.WriteLine($"⚠️  Warning: No parent commit found for {commitSummary.commitId?[..8]}, skipping line count calculation");
-#endif
-                        continue;
+                        await progressCallback("Calculating line changes", current, totalCommits);
                     }
 
-                    string? repositoryId = gitRepository.id;
+#if DEBUG
+                    Console.WriteLine($"[{current}/{totalCommits}] Retrieving line change details for commit {commitSummary.commitId?[..8]} [Author: {commitSummary.author?.name}, Committer: {commitSummary.committer?.name}]");
+#endif
 
-                    // Store per-file line change details
-                    Dictionary<string, CommitLineChangeDetails> fileLineChangeDetailsMap = new Dictionary<string, CommitLineChangeDetails>();
-
-                    // Process each changed file to calculate line changes
-                    if (commitChanges.changes != null)
+                    if (!commitDetailsCollectionMap.TryGetValue(commitSummary.commitId!, out var commitDetails))
                     {
-                        foreach (var changeSummary in commitChanges.changes)
+#if DEBUG
+                        Console.WriteLine($"⚠️  Warning: Could not find details for commit {commitSummary.commitId?[..8]}");
+#endif
+                        return;
+                    }
+
+                    if (!commitChangeCollectionMap.TryGetValue(commitSummary.commitId!, out var commitChanges))
+                    {
+#if DEBUG
+                        Console.WriteLine($"⚠️  Warning: Could not find changes for commit {commitSummary.commitId?[..8]}");
+#endif
+                        return;
+                    }
+
+                    try
+                    {
+                        // Use the first parent for comparison (for merge commits, this compares against the main branch)
+                        string parentCommitId = commitDetails.parents?.FirstOrDefault() ?? string.Empty;
+
+                        if (string.IsNullOrEmpty(parentCommitId))
                         {
-                            try
+#if DEBUG
+                            Console.WriteLine($"⚠️  Warning: No parent commit found for {commitSummary.commitId?[..8]}, skipping line count calculation");
+#endif
+                            return;
+                        }
+
+                        string? repositoryId = gitRepository.id;
+
+                        // Each task creates its own HttpClient to avoid connection pool contention
+                        using var httpClient = new HttpClient();
+                        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+
+                        // Store per-file line change details
+                        Dictionary<string, CommitLineChangeDetails> fileLineChangeDetailsMap = new Dictionary<string, CommitLineChangeDetails>();
+
+                        // Process each changed file to calculate line changes
+                        if (commitChanges.changes != null)
+                        {
+                            foreach (var changeSummary in commitChanges.changes)
                             {
-                                var filePath = changeSummary?.item?.path;
-                                var commitType = changeSummary?.changeType;
-
-                                if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(commitType))
+                                try
                                 {
-                                    continue;
-                                }
+                                    var filePath = changeSummary?.item?.path;
+                                    var commitType = changeSummary?.changeType;
 
-                                // Create the diff parameters JSON
-                                var diffParameters = new
-                                {
-                                    originalPath = filePath,
-                                    originalVersion = parentCommitId,
-                                    modifiedPath = filePath,
-                                    modifiedVersion = commitSummary.commitId,
-                                    partialDiff = true,
-                                    includeCharDiffs = true
-                                };
-
-                                string diffParametersJson = JsonSerializer.Serialize(diffParameters);
-
-                                // Create the file diff API URL
-                                string fileDiffUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project?.name}/_api/_versioncontrol/fileDiff?__v=5&diffParameters={Uri.EscapeDataString(diffParametersJson)}&repositoryId={repositoryId}";
-
-                                var diffResponse = await httpClient.PostAsync(fileDiffUrl, null);
-
-                                if (diffResponse.IsSuccessStatusCode)
-                                {
-                                    string? diffContent = await diffResponse.Content.ReadAsStringAsync();
-                                    var commitLineChangeDetails = JsonSerializer.Deserialize<CommitLineChangeDetails>(diffContent);
-
-                                    // Store the line change details for this specific file
-                                    if (commitLineChangeDetails?.blocks != null)
+                                    if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(commitType))
                                     {
-                                        fileLineChangeDetailsMap[filePath] = commitLineChangeDetails;
+                                        continue;
+                                    }
+
+                                    // Create the diff parameters JSON
+                                    var diffParameters = new
+                                    {
+                                        originalPath = filePath,
+                                        originalVersion = parentCommitId,
+                                        modifiedPath = filePath,
+                                        modifiedVersion = commitSummary.commitId,
+                                        partialDiff = true,
+                                        includeCharDiffs = true
+                                    };
+
+                                    string diffParametersJson = JsonSerializer.Serialize(diffParameters);
+
+                                    // Create the file diff API URL
+                                    string fileDiffUrl = $"https://dev.azure.com/{organizationName}/{gitRepository.project?.name}/_api/_versioncontrol/fileDiff?__v=5&diffParameters={Uri.EscapeDataString(diffParametersJson)}&repositoryId={repositoryId}";
+
+                                    var diffResponse = await SendWithRetryAsync(() => httpClient.PostAsync(fileDiffUrl, null));
+
+                                    if (diffResponse.IsSuccessStatusCode)
+                                    {
+                                        string? diffContent = await diffResponse.Content.ReadAsStringAsync();
+                                        var commitLineChangeDetails = JsonSerializer.Deserialize<CommitLineChangeDetails>(diffContent);
+
+                                        // Store the line change details for this specific file
+                                        if (commitLineChangeDetails?.blocks != null)
+                                        {
+                                            fileLineChangeDetailsMap[filePath] = commitLineChangeDetails;
+                                        }
+                                    }
+                                    else
+                                    {
+#if DEBUG
+                                        Console.WriteLine($"⚠️  Warning: Could not get diff for file {filePath} in commit {commitSummary.commitId?[..8]}");
+#endif
                                     }
                                 }
-                                else
+                                catch (Exception fileEx)
                                 {
-#if DEBUG
-                                    Console.WriteLine($"⚠️  Warning: Could not get diff for file {filePath} in commit {commitSummary.commitId?[..8]}");
-#endif
+                                    Console.WriteLine($"⚠️Warning: Error processing file {changeSummary?.item?.path} for line count: {fileEx.Message}");
                                 }
-
-                                // Small delay to avoid rate limiting
-                                await Task.Delay(10);
-                            }
-                            catch (Exception fileEx)
-                            {
-                                Console.WriteLine($"⚠️Warning: Error processing file {changeSummary?.item?.path} for line count: {fileEx.Message}");
                             }
                         }
-                    }
 
-                    commitLineChangeDetailsMap = await GetFileLineStatisticsAsync(
-                        accessToken,
-                        organizationName,
-                        gitRepository,
-                        commitChangeCollectionMap[commitSummary.commitId!]);
+                        var commitLineChangeDetailsMap = await GetFileLineStatisticsAsync(
+                            accessToken,
+                            organizationName,
+                            gitRepository,
+                            commitChangeCollectionMap[commitSummary.commitId!]);
 
-                    var gitCommit = ToGitCommit(
-                        accessToken,
-                        organizationName,
-                        gitRepository,
-                        commitSummary,
-                        commitDetails,
-                        commitChanges,
-                        fileLineChangeDetailsMap,
-                        commitLineChangeDetailsMap!);
+                        var gitCommit = ToGitCommit(
+                            accessToken,
+                            organizationName,
+                            gitRepository,
+                            commitSummary,
+                            commitDetails,
+                            commitChanges,
+                            fileLineChangeDetailsMap,
+                            commitLineChangeDetailsMap!);
 
-                    gitCommitCollection.Value.Add(gitCommit);
+                        resultBag.Add(gitCommit);
 
 #if DEBUG
-                    PrintUtilities.PrintSingleDashSeparator();
+                        PrintUtilities.PrintSingleDashSeparator();
 #endif
-
-                    // Small delay to avoid rate limiting
-                    await Task.Delay(50);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️  Warning: Could not process commit {commitSummary.commitId}: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    Console.WriteLine($"⚠️  Warning: Could not process commit {commitSummary.commitId}: {ex.Message}");
+                    semaphore.Release();
                 }
-            }
+            });
+
+            await Task.WhenAll(tasks);
+
+            // Sort by CommitterDate descending then by CommitId for deterministic ordering
+            // regardless of parallel execution order (ConcurrentBag is unordered).
+            gitCommitCollection.Value.AddRange(
+                resultBag.OrderByDescending(c => c.CommitterDate)
+                         .ThenBy(c => c.CommitId, StringComparer.OrdinalIgnoreCase));
 
             return gitCommitCollection;
         }
@@ -669,7 +770,7 @@ namespace ProductivityInsights.Metrics
                             // API URL to get file content at specific commit
                             string fileContentUrl = $"https://dev.azure.com/{organizationName}/{gitRepository!.project!.name}/_apis/git/repositories/{gitRepository.id!}/items?path={Uri.EscapeDataString(filePath)}&versionDescriptor.version={commitChange.item.commitId!}&versionDescriptor.versionType=commit&api-version=7.1";
 
-                            var response = await httpClient.GetAsync(fileContentUrl);
+                            var response = await SendWithRetryAsync(() => httpClient.GetAsync(fileContentUrl));
 
                             if (response.IsSuccessStatusCode)
                             {

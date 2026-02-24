@@ -5,18 +5,28 @@
 
     public static class UserToken
     {
+        private static readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
         public static async Task<AccessToken> GetToken()
         {
-            if (IsTokenValid())
+            await _semaphore.WaitAsync();
+            try
             {
+                if (IsTokenValid())
+                {
+                    return _accessToken;
+                }
+
+                var defaultCredential = new DefaultAzureCredential();
+                string[] devopsScopes = new[] { "499b84ac-1321-427f-aa17-267ca6975798/.default" };
+                TokenRequestContext tokenContext = new TokenRequestContext(devopsScopes);
+                _accessToken = await defaultCredential.GetTokenAsync(tokenContext);
                 return _accessToken;
             }
-
-            var defaultCredential = new DefaultAzureCredential();
-            string[] devopsScopes = new[] { "499b84ac-1321-427f-aa17-267ca6975798/.default" };
-            TokenRequestContext tokenContext = new TokenRequestContext(devopsScopes);
-            _accessToken = await defaultCredential.GetTokenAsync(tokenContext);
-            return _accessToken;
+            finally
+            {
+                _semaphore.Release();
+            }
         }
 
         private static bool IsTokenValid()
