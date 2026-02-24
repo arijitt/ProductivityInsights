@@ -11,7 +11,7 @@
 @rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
 @inject ProductivityInsights.Services.ThemeService ThemeService
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>Productivity Overview</PageTitle>
 
@@ -90,9 +90,23 @@
 
             @if (!string.IsNullOrEmpty(analysisResultHtml))
             {
-                <div class="analysis-results">
+                <div class="analysis-results" id="analysisResultsContainer">
                     <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
                         <span aria-hidden="true">×</span>
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary"
+                            @onclick="DownloadAsPdf"
+                            disabled="@isGeneratingPdf"
+                            style="position: absolute; top: 1rem; right: calc(3rem + 32px); z-index: 10;">
+                        @if (isGeneratingPdf)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                            <span>Generating...</span>
+                        }
+                        else
+                        {
+                            <span>📥 PDF</span>
+                        }
                     </button>
                     @if (selectedView == "details")
                     {
@@ -177,9 +191,21 @@
         InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose()
+    private IJSObjectReference? _jsModule;
+
+    private async Task<IJSObjectReference> GetJsModule()
+    {
+        _jsModule ??= await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./theme.module.js");
+        return _jsModule;
+    }
+
+    public async ValueTask DisposeAsync()
     {
         ThemeService.OnThemeChanged -= OnThemeChanged;
+        if (_jsModule is not null)
+        {
+            await _jsModule.DisposeAsync();
+        }
     }
 
     private RenderFragment RenderAnalysisForm() => __builder =>
@@ -1386,6 +1412,63 @@
     }
 
     
+    private async Task DownloadAsPdf()
+    {
+        isGeneratingPdf = true;
+        StateHasChanged();
+
+        try
+        {
+            // Auto-expand all rows and load details
+            var originalExpandedRows = new HashSet<string>(expandedRows);
+
+            foreach (var contributor in contributors)
+            {
+                if (!expandedRows.Contains(contributor.Name))
+                {
+                    expandedRows.Add(contributor.Name);
+
+                    if (!contributorDetails.ContainsKey(contributor.Name))
+                    {
+                        string details;
+                        if (selectedOption == "workItems")
+                        {
+                            details = await GetWorkContributionDetails(contributor.Name);
+                        }
+                        else if (selectedOption == "gitCommits")
+                        {
+                            details = await GetCodeContributionDetails(contributor.Name);
+                        }
+                        else
+                        {
+                            details = await GetIncidentAttendanceDetails(contributor.Name);
+                        }
+                        contributorDetails[contributor.Name] = details;
+                    }
+                }
+            }
+
+            StateHasChanged();
+            await Task.Delay(300); // Allow DOM to render expanded rows
+
+            string fileName = $"ProductivityInsights_{selectedOption}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+            var module = await GetJsModule();
+            await module.InvokeVoidAsync("downloadResultsAsPdf", "analysisResultsContainer", fileName);
+
+            // Restore original expanded state
+            expandedRows = originalExpandedRows;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"PDF generation error: {ex.Message}");
+        }
+        finally
+        {
+            isGeneratingPdf = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task<List<(string Name, string Summary)>> GetIncidentCollection()
     {
         IncidentQueryOptions incidentQueryOptions = GetIncidentQueryOptions();
@@ -2206,6 +2289,7 @@
     private HashSet<string> expandedRows = new HashSet<string>();
     private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
     private bool isLoadingResults = false;
+    private bool isGeneratingPdf = false;
     private Dictionary<string, string> contributorDetails = new Dictionary<string, string>();
     private List<CommitTrendDataPoint>? trendData = null;
     private string trendProgressPhase = "";

@@ -186,3 +186,129 @@ window.scrollToBottom = function(smooth = true) {
         behavior: smooth ? 'smooth' : 'auto'
     });
 };
+
+window._loadScript = function (src) {
+    return new Promise(function (resolve, reject) {
+        var script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = function () { reject(new Error('Failed to load ' + src)); };
+        document.head.appendChild(script);
+    });
+};
+
+window.downloadResultsAsPdf = async function (elementId, fileName) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        alert('PDF Error: Results container not found.');
+        return 'Element not found';
+    }
+
+    // Dynamically load libraries if they failed to load from script tags
+    if (typeof html2canvas === 'undefined') {
+        try {
+            await window._loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        } catch (e) {
+            alert('PDF Error: html2canvas library failed to load. Check your network connection and try again.');
+            return 'html2canvas not loaded';
+        }
+    }
+
+    if (!window.jspdf) {
+        try {
+            await window._loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+        } catch (e) {
+            alert('PDF Error: jsPDF library failed to load. Check your network connection and try again.');
+            return 'jsPDF not loaded';
+        }
+    }
+
+    try {
+        // Temporarily remove scroll constraints for full capture
+        const originalMaxHeight = element.style.maxHeight;
+        const originalOverflow = element.style.overflow;
+        element.style.maxHeight = 'none';
+        element.style.overflow = 'visible';
+
+        const canvas = await html2canvas(element, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            allowTaint: true,
+            backgroundColor: getComputedStyle(document.documentElement)
+                .getPropertyValue('--bs-body-bg')?.trim() || '#ffffff'
+        });
+
+        // Restore original styles
+        element.style.maxHeight = originalMaxHeight;
+        element.style.overflow = originalOverflow;
+
+        if (!canvas || canvas.width === 0 || canvas.height === 0) {
+            alert('PDF Error: Failed to capture page content.');
+            return 'Canvas capture failed';
+        }
+
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+
+        // Calculate PDF dimensions maintaining aspect ratio
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const margin = 10;
+
+        // Use landscape for wide content, portrait for tall content
+        const isLandscape = imgWidth > imgHeight;
+        const pdf = new jsPDF({
+            orientation: isLandscape ? 'landscape' : 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        const pdfPageWidth = pdf.internal.pageSize.getWidth();
+        const pdfPageHeight = pdf.internal.pageSize.getHeight();
+        const contentWidth = pdfPageWidth - 2 * margin;
+        const scaleFactor = contentWidth / imgWidth;
+        const scaledHeight = imgHeight * scaleFactor;
+        const pageHeight = pdfPageHeight - 2 * margin;
+
+        let yOffset = 0;
+
+        // Paginate if content exceeds one page
+        while (yOffset < scaledHeight) {
+            if (yOffset > 0) {
+                pdf.addPage();
+            }
+            pdf.addImage(imgData, 'PNG', margin, margin - yOffset, contentWidth, scaledHeight);
+            yOffset += pageHeight;
+        }
+
+        // Show Save As dialog using File System Access API, fallback to auto-download
+        const pdfBlob = pdf.output('blob');
+        if (window.showSaveFilePicker) {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: fileName,
+                    types: [{
+                        description: 'PDF Document',
+                        accept: { 'application/pdf': ['.pdf'] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(pdfBlob);
+                await writable.close();
+            } catch (pickerError) {
+                // User cancelled the dialog
+                if (pickerError.name !== 'AbortError') {
+                    pdf.save(fileName);
+                }
+            }
+        } else {
+            pdf.save(fileName);
+        }
+        return '';
+    } catch (error) {
+        console.error('PDF generation failed:', error);
+        alert('PDF generation failed: ' + error.message);
+        return error.message;
+    }
+};
