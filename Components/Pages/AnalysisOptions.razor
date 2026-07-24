@@ -3,6 +3,7 @@
 @using ProductivityInsights.Models
 @using ProductivityInsights.Models.CommitChanges
 @using ProductivityInsights.Models.Incidents
+@using ProductivityInsights.Models.Teams
 @using ProductivityInsights.Models.WorkItems
 @using ProductivityInsights.Models.WorkItems.HistoryCollection
 @using ProductivityInsights.Options
@@ -33,6 +34,13 @@
                         type="button" 
                         @onclick="@(() => selectedView = "trends")">
                     Trends
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fs-5 fw-bold @(selectedView == "teams" ? "active" : "")" 
+                        type="button" 
+                        @onclick="@(() => selectedView = "teams")">
+                    Teams
                 </button>
             </li>
         </ul>
@@ -68,6 +76,10 @@
                 <div class="tab-pane fade @(selectedOption == "workItems" ? "show active" : "")" role="tabpanel">
                     @if (selectedOption == "workItems")
                     {
+                        @if (selectedView == "teams")
+                        {
+                            @RenderManagerSelection()
+                        }
                         <h4 class="mb-4">Work Items Analysis</h4>
                         @RenderAnalysisForm()
                     }
@@ -75,6 +87,10 @@
                 <div class="tab-pane fade @(selectedOption == "gitCommits" ? "show active" : "")" role="tabpanel">
                     @if (selectedOption == "gitCommits")
                     {
+                        @if (selectedView == "teams")
+                        {
+                            @RenderManagerSelection()
+                        }
                         <h4 class="mb-4">Git Commits Analysis</h4>
                         @RenderGitCommitsForm()
                     }
@@ -82,6 +98,10 @@
                 <div class="tab-pane fade @(selectedOption == "icmResolutions" ? "show active" : "")" role="tabpanel">
                     @if (selectedOption == "icmResolutions")
                     {
+                        @if (selectedView == "teams")
+                        {
+                            @RenderManagerSelection()
+                        }
                         <h4 class="mb-4">ICM Resolutions Analysis</h4>
                         @RenderICMAnalysisForm()
                     }
@@ -108,7 +128,7 @@
                             <span>📥 PDF</span>
                         }
                     </button>
-                    @if (selectedView == "details")
+                    @if (selectedView == "details" || selectedView == "teams")
                     {
                         <div style="margin-top: 2.5rem;">
                         @if (selectedOption == "gitCommits")
@@ -242,25 +262,66 @@
         {
             <div class="mb-4">
                 <label for="teamSelect" class="form-label">Team Name</label>
-                <select id="teamSelect" class="form-select" @onchange="OnTeamChanged" value="@selectedTeam">
-                    <option value="Cosmos on Azure Job Service">Cosmos on Azure Job Service</option>
-                    <option value="FastSpark">FastSpark</option>
-                    <option value="JS Reliability">JS Reliability</option>
-                    <option value="Job Service V2">Job Service V2</option>
-                    <option value="Lakehouse Job Execution and Capacities">Lakehouse Job Execution and Capacities</option>
-                </select>
+                @if (selectedView == "teams")
+                {
+                    <div class="team-dd">
+                        <RadzenDropDown @bind-Value="@selectedTeamsList"
+                                        Data="@teamOptions"
+                                        Multiple="true"
+                                        AllowClear="true"
+                                        AllowSelectAll="true"
+                                        SelectAllText="Select All"
+                                        Placeholder="Select team(s)"
+                                        Change="@OnSelectedTeamsChanged"
+                                        Style="width: 100%;" />
+                    </div>
+                    @if (selectedTeamsList == null || !selectedTeamsList.Any())
+                    {
+                        <div class="text-muted small mt-1">Select at least one team.</div>
+                    }
+                }
+                else
+                {
+                    <select id="teamSelect" class="form-select" @onchange="OnTeamChanged" value="@selectedTeam">
+                        @foreach (var team in teamOptions)
+                        {
+                            <option value="@team">@team</option>
+                        }
+                    </select>
+                }
             </div>
         }
 
         <div class="mb-4">
             <label for="areaPathSelect" class="form-label">Area Path</label>
-            <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
-                <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure" disabled="@(!IsAreaPathApplicable("A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure"))">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
-                <option value="A365\FastSpark" disabled="@(!IsAreaPathApplicable("A365\\FastSpark"))">A365\FastSpark</option>
-                <option value="A365\JS Reliability" disabled="@(!IsAreaPathApplicable("A365\\JS Reliability"))">A365\JS Reliability</option>
-                <option value="A365\Job Service V2" disabled="@(!IsAreaPathApplicable("A365\\Job Service V2"))">A365\Job Service V2</option>
-                <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities" disabled="@(!IsAreaPathApplicable("A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"))">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
-            </select>
+            @if (selectedView == "teams")
+            {
+                <div class="team-dd">
+                    <RadzenDropDown @bind-Value="@selectedAreaPathsList"
+                                    Data="@areaPathOptions"
+                                    Multiple="true"
+                                    AllowClear="true"
+                                    AllowSelectAll="true"
+                                    SelectAllText="Select All"
+                                    Placeholder="Select area path(s)"
+                                    Change="@OnSelectedAreaPathsChanged"
+                                    Style="width: 100%;" />
+                </div>
+                @if (selectedAreaPathsList == null || !selectedAreaPathsList.Any())
+                {
+                    <div class="text-muted small mt-1">Select at least one area path.</div>
+                }
+            }
+            else
+            {
+                <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
+                    <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure" disabled="@(!IsAreaPathApplicable("A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure"))">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
+                    <option value="A365\FastSpark" disabled="@(!IsAreaPathApplicable("A365\\FastSpark"))">A365\FastSpark</option>
+                    <option value="A365\JS Reliability" disabled="@(!IsAreaPathApplicable("A365\\JS Reliability"))">A365\JS Reliability</option>
+                    <option value="A365\Job Service V2" disabled="@(!IsAreaPathApplicable("A365\\Job Service V2"))">A365\Job Service V2</option>
+                    <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities" disabled="@(!IsAreaPathApplicable("A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"))">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
+                </select>
+            }
         </div>
 
         <div class="datetime-group mb-4">
@@ -520,10 +581,369 @@
         }
     }
 
+    // ---- Teams view (manager org-tree) UI + handlers ----
+
+    private RenderFragment RenderManagerSelection() => __builder =>
+    {
+        <div class="manager-selection mb-4 p-3 rounded border">
+            <h5 class="mb-3 fw-bold">👥 Manager Selection</h5>
+            <div class="d-flex gap-2 align-items-start flex-wrap">
+                <input type="text"
+                       class="form-control manager-search-input"
+                       placeholder="Type a manager's name..."
+                       @bind="managerSearchText"
+                       @bind:event="oninput"
+                       @onkeydown="@OnManagerSearchKeyDown" />
+                <button class="btn btn-primary" @onclick="SearchManagersAsync" disabled="@isSearchingManagers">
+                    @if (isSearchingManagers)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        <span>Searching...</span>
+                    }
+                    else
+                    {
+                        <span>🔍 Search</span>
+                    }
+                </button>
+                <button type="button"
+                        class="btn btn-primary"
+                        @onclick="ClearManagerSelection">
+                    🧹 Clear
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(teamsErrorMessage))
+            {
+                <div class="alert alert-warning mt-3 mb-0 py-2">@teamsErrorMessage</div>
+            }
+
+            @if (selectedManager == null && managerSearchResults.Any())
+            {
+                <div class="manager-results mt-3">
+                    <div class="text-muted small mb-1">Select a manager:</div>
+                    <ul class="list-group">
+                        @foreach (var user in managerSearchResults)
+                        {
+                            <li class="list-group-item manager-result-item d-flex justify-content-between align-items-center"
+                                @onclick="@(() => SelectManager(user))">
+                                <span>
+                                    <span class="fw-bold">@user.displayName</span>
+                                    @if (!string.IsNullOrEmpty(user.jobTitle))
+                                    {
+                                        <span class="text-muted small"> — @user.jobTitle</span>
+                                    }
+                                </span>
+                                <span class="d-flex align-items-center gap-2">
+                                    <span class="text-muted small">@(user.mail ?? user.userPrincipalName)</span>
+                                    <button type="button"
+                                            class="btn btn-primary btn-sm"
+                                            @onclick="@(() => LoadOrgTreeForManagerAsync(user))"
+                                            @onclick:stopPropagation="true"
+                                            disabled="@isLoadingOrgTree">
+                                        Fetch Reports
+                                    </button>
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+            else if (selectedManager == null && !isSearchingManagers && hasSearchedManagers)
+            {
+                <div class="text-muted mt-3 mb-0">No matching users found.</div>
+            }
+
+            @if (selectedManager != null)
+            {
+                <div class="selected-manager-chip mt-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <div>
+                        <span class="fw-bold">@selectedManager.displayName</span>
+                        @if (!string.IsNullOrEmpty(selectedManager.jobTitle))
+                        {
+                            <span class="text-muted small"> — @selectedManager.jobTitle</span>
+                        }
+                        <span class="text-muted small d-block">@(selectedManager.mail ?? selectedManager.userPrincipalName)</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="LoadOrgTreeAsync" disabled="@isLoadingOrgTree">
+                            @if (isLoadingOrgTree)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                <span>Fetching...</span>
+                            }
+                            else
+                            {
+                                <span>Fetch Reports</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            }
+
+            @if (orgTreeRoot != null)
+            {
+                <div class="org-tree-container mt-3">
+                    <div class="text-muted small mb-2">@orgTreeMemberCount report(s) under @orgTreeRoot.DisplayName</div>
+                    <ul class="org-tree">
+                        @RenderOrgTree(orgTreeRoot, true)
+                    </ul>
+                </div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderOrgTree(OrgMember node, bool isRoot) => __builder =>
+    {
+        var nodeId = node.Id ?? node.DisplayName ?? Guid.NewGuid().ToString();
+        var isExpanded = expandedOrgNodes.Contains(nodeId);
+
+        <li class="org-tree-node">
+            <div class="org-tree-row d-flex align-items-center">
+                @if (node.HasReports)
+                {
+                    <button class="btn btn-sm org-tree-toggle" @onclick="@(() => ToggleOrgNode(nodeId))" type="button">
+                        @(isExpanded ? "▼" : "▶")
+                    </button>
+                }
+                else
+                {
+                    <span class="org-tree-leaf-spacer"></span>
+                }
+                <div class="org-tree-info">
+                    <span class="fw-bold">@node.DisplayName</span>
+                    @if (!string.IsNullOrEmpty(node.JobTitle))
+                    {
+                        <span class="text-muted small"> — @node.JobTitle</span>
+                    }
+                    @if (node.HasReports)
+                    {
+                        <span class="badge bg-secondary ms-2">@node.Reports.Count</span>
+                    }
+                    <span class="text-muted small d-block">@(node.Mail ?? node.UserPrincipalName)</span>
+                </div>
+            </div>
+            @if (node.HasReports && isExpanded)
+            {
+                <ul class="org-tree">
+                    @foreach (var child in node.Reports)
+                    {
+                        @RenderOrgTree(child, false)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private bool hasSearchedManagers = false;
+
+    private async Task OnManagerSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchManagersAsync();
+        }
+    }
+
+    private async Task SearchManagersAsync()
+    {
+        if (string.IsNullOrWhiteSpace(managerSearchText))
+        {
+            return;
+        }
+
+        var operationVersion = ++managerOperationVersion;
+        isSearchingManagers = true;
+        teamsErrorMessage = null;
+        selectedManager = null;
+        orgTreeRoot = null;
+        managerSearchResults = new List<GraphUser>();
+        StateHasChanged();
+
+        try
+        {
+            var results = await TeamHierarchyMetrics.SearchManagersAsync(managerSearchText);
+            if (operationVersion != managerOperationVersion)
+            {
+                return;
+            }
+
+            managerSearchResults = results;
+            if (!results.Any())
+            {
+                teamsErrorMessage = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (operationVersion == managerOperationVersion)
+            {
+                teamsErrorMessage = $"Failed to search managers: {ex.Message}";
+            }
+        }
+        finally
+        {
+            if (operationVersion == managerOperationVersion)
+            {
+                hasSearchedManagers = true;
+                isSearchingManagers = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private void SelectManager(GraphUser user)
+    {
+        selectedManager = user;
+        managerSearchResults = new List<GraphUser>();
+        orgTreeRoot = null;
+        expandedOrgNodes.Clear();
+        teamsErrorMessage = null;
+    }
+
+    private async Task LoadOrgTreeForManagerAsync(GraphUser manager)
+    {
+        SelectManager(manager);
+        await LoadOrgTreeAsync();
+    }
+
+    private void ClearManagerSelection()
+    {
+        managerOperationVersion++;
+        managerSearchText = string.Empty;
+        managerSearchResults = new List<GraphUser>();
+        selectedManager = null;
+        orgTreeRoot = null;
+        expandedOrgNodes.Clear();
+        isSearchingManagers = false;
+        isLoadingOrgTree = false;
+        teamsErrorMessage = null;
+        hasSearchedManagers = false;
+        orgTreeMemberCount = 0;
+    }
+
+    private async Task LoadOrgTreeAsync()
+    {
+        if (selectedManager == null)
+        {
+            return;
+        }
+
+        var operationVersion = ++managerOperationVersion;
+        isLoadingOrgTree = true;
+        teamsErrorMessage = null;
+        orgTreeRoot = null;
+        StateHasChanged();
+
+        try
+        {
+            var root = await TeamHierarchyMetrics.GetReportsHierarchyAsync(selectedManager);
+            if (operationVersion != managerOperationVersion)
+            {
+                return;
+            }
+
+            RemoveServiceAccounts(root);
+            orgTreeRoot = root;
+            if (root == null)
+            {
+                teamsErrorMessage = "Could not retrieve reports. Ensure the app has Microsoft Graph permissions (User.Read.All or Directory.Read.All).";
+            }
+            else
+            {
+                orgTreeMemberCount = CountReports(root);
+                expandedOrgNodes.Clear();
+                if (!string.IsNullOrEmpty(root.Id))
+                {
+                    expandedOrgNodes.Add(root.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (operationVersion == managerOperationVersion)
+            {
+                teamsErrorMessage = $"Failed to fetch reports: {ex.Message}";
+            }
+        }
+        finally
+        {
+            if (operationVersion == managerOperationVersion)
+            {
+                isLoadingOrgTree = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private static void RemoveServiceAccounts(OrgMember? node)
+    {
+        if (node == null)
+        {
+            return;
+        }
+
+        var visibleReports = new List<OrgMember>();
+        foreach (var report in node.Reports)
+        {
+            RemoveServiceAccounts(report);
+
+            var email = report.Mail ?? report.UserPrincipalName;
+            if (email?.StartsWith("sc-", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                visibleReports.AddRange(report.Reports);
+            }
+            else
+            {
+                visibleReports.Add(report);
+            }
+        }
+
+        node.Reports = visibleReports;
+    }
+
+    private void ToggleOrgNode(string nodeId)
+    {
+        if (!expandedOrgNodes.Add(nodeId))
+        {
+            expandedOrgNodes.Remove(nodeId);
+        }
+    }
+
+    private static int CountReports(OrgMember node)
+    {
+        int count = node.Reports.Count;
+        foreach (var child in node.Reports)
+        {
+            count += CountReports(child);
+        }
+        return count;
+    }
+
     private void OnTeamChanged(ChangeEventArgs e)
     {
         selectedTeam = e.Value?.ToString() ?? "Cosmos on Azure Job Service";
         selectedAreaPath = GetAreaPathForTeam();
+    }
+
+    private void OnSelectedTeamsChanged(object value)
+    {
+        selectedTeams = new HashSet<string>(selectedTeamsList ?? Enumerable.Empty<string>());
+
+        // Keep the single-select team coherent with the multi-select.
+        // Area Path has its own independent multi-select in the Teams view.
+        if (selectedTeams.Any())
+        {
+            selectedTeam = selectedTeams.First();
+        }
+    }
+
+    private void OnSelectedAreaPathsChanged(object value)
+    {
+        // Keep the single-select area path coherent with the multi-select.
+        if (selectedAreaPathsList != null && selectedAreaPathsList.Any())
+        {
+            selectedAreaPath = selectedAreaPathsList.First();
+        }
     }
 
     private void OnOrganizationChanged(ChangeEventArgs e)
@@ -2283,7 +2703,26 @@
     private string selectedOption = "workItems";
     private string selectedView = "details";
     private string selectedTeam = "Cosmos on Azure Job Service";
+    private static readonly string[] teamOptions = new[]
+    {
+        "Cosmos on Azure Job Service",
+        "FastSpark",
+        "JS Reliability",
+        "Job Service V2",
+        "Lakehouse Job Execution and Capacities"
+    };
+    private HashSet<string> selectedTeams = new HashSet<string> { "Cosmos on Azure Job Service" };
+    private IEnumerable<string> selectedTeamsList = new List<string> { "Cosmos on Azure Job Service" };
     private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
+    private static readonly string[] areaPathOptions = new[]
+    {
+        "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure",
+        "A365\\FastSpark",
+        "A365\\JS Reliability",
+        "A365\\Job Service V2",
+        "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"
+    };
+    private IEnumerable<string> selectedAreaPathsList = new List<string> { "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure" };
     private string selectedGitRepository = "BBC-VHD";
     private string selectedTargetBranch = "master";
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
@@ -2304,6 +2743,18 @@
     private int trendProgressCurrent = 0;
     private int trendProgressTotal = 0;
     private string selectedTrendTab = "table";
+
+    // ---- Teams view (manager org-tree) state ----
+    private string managerSearchText = string.Empty;
+    private List<GraphUser> managerSearchResults = new List<GraphUser>();
+    private GraphUser? selectedManager = null;
+    private OrgMember? orgTreeRoot = null;
+    private HashSet<string> expandedOrgNodes = new HashSet<string>();
+    private bool isSearchingManagers = false;
+    private bool isLoadingOrgTree = false;
+    private string? teamsErrorMessage = null;
+    private int orgTreeMemberCount = 0;
+    private int managerOperationVersion = 0;
 
     private void SetTrendTabTable() => selectedTrendTab = "table";
     private void SetTrendTabChart() => selectedTrendTab = "chart";
