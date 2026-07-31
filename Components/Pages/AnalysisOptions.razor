@@ -232,88 +232,73 @@
 
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
-        <div class="mb-4">
-            <div class="row">
-                <div class="col-md-6 mb-3 mb-md-0">
-                    <label for="organizationSelect" class="form-label">Organization Name</label>
-                    <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
-                        <option value="msdata">msdata</option>
-                        <!--<option value="powerbi">powerbi</option>-->
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <label for="projectSelect" class="form-label">Project Name</label>
-                    <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
-                        @if (selectedOrganization == "msdata")
-                        {
-                            <option value="A365">A365</option>
-                            <!--<option value="HDInsight">HDInsight</option>-->
-                        }
-                        else if (selectedOrganization == "powerbi")
-                        {
-                            <!--<option value="MWC">MWC</option>-->
-                        }
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        @if (selectedProject == "A365")
+        @if (selectedView == "teams")
         {
             <div class="mb-4">
-                <label for="teamSelect" class="form-label">Team Name</label>
-                @if (selectedView == "teams")
+                <label class="form-label">Organization : Project : Team : Area Path</label>
+                <div class="team-dd">
+                    <RadzenDropDown @bind-Value="@selectedTeamCombinations"
+                                    Data="@teamCombinationOptions"
+                                    Multiple="true"
+                                    AllowClear="true"
+                                    AllowSelectAll="true"
+                                    SelectAllText="Select All"
+                                    Placeholder="Select organization : project : team : area path"
+                                    Change="@OnSelectedTeamCombinationsChanged"
+                                    Style="width: 100%;" />
+                </div>
+                @if (selectedTeamCombinations == null || !selectedTeamCombinations.Any())
                 {
-                    <div class="team-dd">
-                        <RadzenDropDown @bind-Value="@selectedTeamsList"
-                                        Data="@teamOptions"
-                                        Multiple="true"
-                                        AllowClear="true"
-                                        AllowSelectAll="true"
-                                        SelectAllText="Select All"
-                                        Placeholder="Select team(s)"
-                                        Change="@OnSelectedTeamsChanged"
-                                        Style="width: 100%;" />
-                    </div>
-                    @if (selectedTeamsList == null || !selectedTeamsList.Any())
-                    {
-                        <div class="text-muted small mt-1">Select at least one team.</div>
-                    }
+                    <div class="text-muted small mt-1">Select at least one organization : project : team : area path combination.</div>
                 }
-                else
-                {
+            </div>
+        }
+        else
+        {
+            <div class="mb-4">
+                <div class="row">
+                    <div class="col-md-6 mb-3 mb-md-0">
+                        <label for="organizationSelect" class="form-label">Organization Name</label>
+                        <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
+                            <option value="msdata">msdata</option>
+                            <!--<option value="powerbi">powerbi</option>-->
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="projectSelect" class="form-label">Project Name</label>
+                        <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
+                            @if (selectedOrganization == "msdata")
+                            {
+                                <option value="A365">A365</option>
+                                <!--<option value="HDInsight">HDInsight</option>-->
+                            }
+                            else if (selectedOrganization == "powerbi")
+                            {
+                                <!--<option value="MWC">MWC</option>-->
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            @if (selectedProject == "A365")
+            {
+                <div class="mb-4">
+                    <label for="teamSelect" class="form-label">Team Name</label>
                     <select id="teamSelect" class="form-select" @onchange="OnTeamChanged" value="@selectedTeam">
                         @foreach (var team in teamOptions)
                         {
                             <option value="@team">@team</option>
                         }
                     </select>
-                }
-            </div>
+                </div>
+            }
         }
 
-        <div class="mb-4">
-            <label for="areaPathSelect" class="form-label">Area Path</label>
-            @if (selectedView == "teams")
-            {
-                <div class="team-dd">
-                    <RadzenDropDown @bind-Value="@selectedAreaPathsList"
-                                    Data="@areaPathOptions"
-                                    Multiple="true"
-                                    AllowClear="true"
-                                    AllowSelectAll="true"
-                                    SelectAllText="Select All"
-                                    Placeholder="Select area path(s)"
-                                    Change="@OnSelectedAreaPathsChanged"
-                                    Style="width: 100%;" />
-                </div>
-                @if (selectedAreaPathsList == null || !selectedAreaPathsList.Any())
-                {
-                    <div class="text-muted small mt-1">Select at least one area path.</div>
-                }
-            }
-            else
-            {
+        @if (selectedView != "teams")
+        {
+            <div class="mb-4">
+                <label for="areaPathSelect" class="form-label">Area Path</label>
                 <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
                     <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure" disabled="@(!IsAreaPathApplicable("A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure"))">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
                     <option value="A365\FastSpark" disabled="@(!IsAreaPathApplicable("A365\\FastSpark"))">A365\FastSpark</option>
@@ -321,8 +306,8 @@
                     <option value="A365\Job Service V2" disabled="@(!IsAreaPathApplicable("A365\\Job Service V2"))">A365\Job Service V2</option>
                     <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities" disabled="@(!IsAreaPathApplicable("A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"))">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
                 </select>
-            }
-        </div>
+            </div>
+        }
 
         <div class="datetime-group mb-4">
             <div class="row">
@@ -717,7 +702,7 @@
                     }
                     @if (node.HasReports)
                     {
-                        <span class="badge bg-secondary ms-2">@node.Reports.Count</span>
+                        <span class="badge bg-secondary ms-2">@node.Reports.Count (@CountReports(node))</span>
                     }
                     <span class="text-muted small d-block">@(node.Mail ?? node.UserPrincipalName)</span>
                 </div>
@@ -923,26 +908,31 @@
     {
         selectedTeam = e.Value?.ToString() ?? "Cosmos on Azure Job Service";
         selectedAreaPath = GetAreaPathForTeam();
+        SyncSelectedTeamCombinations();
     }
 
-    private void OnSelectedTeamsChanged(object value)
+    private void OnSelectedTeamCombinationsChanged(object value)
     {
-        selectedTeams = new HashSet<string>(selectedTeamsList ?? Enumerable.Empty<string>());
+        selectedTeams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var isFirstCombination = true;
 
-        // Keep the single-select team coherent with the multi-select.
-        // Area Path has its own independent multi-select in the Teams view.
-        if (selectedTeams.Any())
+        foreach (var combination in selectedTeamCombinations ?? Enumerable.Empty<string>())
         {
-            selectedTeam = selectedTeams.First();
-        }
-    }
+            var parts = combination.Split(TeamCombinationSeparator, 4, StringSplitOptions.None);
+            if (parts.Length != 4)
+            {
+                continue;
+            }
 
-    private void OnSelectedAreaPathsChanged(object value)
-    {
-        // Keep the single-select area path coherent with the multi-select.
-        if (selectedAreaPathsList != null && selectedAreaPathsList.Any())
-        {
-            selectedAreaPath = selectedAreaPathsList.First();
+            selectedTeams.Add(parts[2]);
+            if (isFirstCombination)
+            {
+                selectedOrganization = parts[0];
+                selectedProject = parts[1];
+                selectedTeam = parts[2];
+                selectedAreaPath = parts[3];
+                isFirstCombination = false;
+            }
         }
     }
 
@@ -961,6 +951,7 @@
             selectedGitRepository = "workload-sparkcore";
         }
         selectedTargetBranch = GetTargetBranch();
+        SyncSelectedTeamCombinations();
     }
 
     private void OnProjectChanged(ChangeEventArgs e)
@@ -970,6 +961,7 @@
         {
             selectedTeam = "Cosmos on Azure Job Service";
             selectedGitRepository = "BBC-VHD";
+            selectedAreaPath = GetAreaPathForTeam();
         }
         else if (selectedProject == "HDInsight")
         {
@@ -980,6 +972,27 @@
             selectedGitRepository = "workload-sparkcore";
         }
         selectedTargetBranch = GetTargetBranch();
+        SyncSelectedTeamCombinations();
+    }
+
+    private void SyncSelectedTeamCombinations()
+    {
+        var combination = BuildTeamCombination(selectedOrganization, selectedProject, selectedTeam, selectedAreaPath);
+        if (teamCombinationOptions.Contains(combination, StringComparer.OrdinalIgnoreCase))
+        {
+            selectedTeamCombinations = new List<string> { combination };
+            selectedTeams = new HashSet<string>(new[] { selectedTeam }, StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            selectedTeamCombinations = new List<string>();
+            selectedTeams.Clear();
+        }
+    }
+
+    private static string BuildTeamCombination(string organization, string project, string team, string areaPath)
+    {
+        return $"{organization}{TeamCombinationSeparator}{project}{TeamCombinationSeparator}{team}{TeamCombinationSeparator}{areaPath}";
     }
 
     private void OnGitRepositoryChanged(ChangeEventArgs e)
@@ -1054,7 +1067,12 @@
 
     private string GetAreaPathForTeam()
     {
-        return selectedTeam switch
+        return GetAreaPathForTeam(selectedTeam);
+    }
+
+    private static string GetAreaPathForTeam(string team)
+    {
+        return team switch
         {
             "Cosmos on Azure Job Service" => "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure",
             "FastSpark" => "A365\\FastSpark",
@@ -1123,22 +1141,51 @@
         
         html.Append("<table class='table table-sm table-bordered'>");
         html.Append("<tbody>");
-        
+
+        // Teams + Work Items: reflect the multiselect combinations and the manager filter.
+        bool teamsWorkItems = selectedView == "teams" && selectedOption == "workItems";
+
         // Common parameters
-        if (selectedOption != "icmResolutions")
+        if (selectedOption != "icmResolutions" && !teamsWorkItems)
         {
             html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Organization</td><td>{selectedOrganization}</td></tr>");
             html.Append($"<tr><td class='fw-bold'>Project</td><td>{selectedProject}</td></tr>");
         }
-        
+
         // Work Items specific
         if (selectedOption == "workItems")
         {
-            if (selectedProject == "A365")
+            if (teamsWorkItems)
             {
-                html.Append($"<tr><td class='fw-bold'>Team Name</td><td>{selectedTeam}</td></tr>");
+                var managerLabel = System.Net.WebUtility.HtmlEncode(selectedManager?.displayName ?? "None selected");
+                html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
+
+                var combinations = ParseSelectedTeamCombinations();
+                html.Append($"<tr><td class='fw-bold'>Selections ({combinations.Count})</td><td>");
+                if (combinations.Any())
+                {
+                    html.Append("<ul class='mb-0 ps-3'>");
+                    foreach (var (org, project, team, areaPath) in combinations)
+                    {
+                        var entry = System.Net.WebUtility.HtmlEncode($"{org}{TeamCombinationSeparator}{project}{TeamCombinationSeparator}{team}{TeamCombinationSeparator}{areaPath}");
+                        html.Append($"<li>{entry}</li>");
+                    }
+                    html.Append("</ul>");
+                }
+                else
+                {
+                    html.Append("None selected");
+                }
+                html.Append("</td></tr>");
             }
-            html.Append($"<tr><td class='fw-bold'>Area Path</td><td>{selectedAreaPath}</td></tr>");
+            else
+            {
+                if (selectedProject == "A365")
+                {
+                    html.Append($"<tr><td class='fw-bold'>Team Name</td><td>{selectedTeam}</td></tr>");
+                }
+                html.Append($"<tr><td class='fw-bold'>Area Path</td><td>{selectedAreaPath}</td></tr>");
+            }
         }
         
         // Git Commits specific
@@ -1414,7 +1461,14 @@
                 <thead>
                     <tr>
                         <th colspan="3" class="text-center fw-bold table-title-header">
-                            Work Items Completion Summary for '@selectedOrganization\@selectedProject\@selectedAreaPath'
+                            @if (selectedView == "teams")
+                            {
+                                <text>Work Items Completion Summary under '@(selectedManager?.displayName ?? "selected manager")' across @selectedTeamCombinations.Count() selection(s)</text>
+                            }
+                            else
+                            {
+                                <text>Work Items Completion Summary for '@selectedOrganization\@selectedProject\@selectedAreaPath'</text>
+                            }
                         </th>
                     </tr>
                     <tr>
@@ -2449,6 +2503,11 @@
 
     private async Task<List<(string Name, string Summary)>> GetWorkItemCollection()
     {
+        if (selectedView == "teams")
+        {
+            return await GetTeamsWorkItemCollection();
+        }
+
         WorkItemQueryOptions workItemQueryOptions = GetWorkItemQueryOptions();
 
         this.workItemDetailsCollection = await WorkItemCompletionMetrics.QueryWorkItemDetailsAsync(
@@ -2481,6 +2540,168 @@
             .ToList();
 
         return workItemStatistics;
+    }
+
+    // ---- Teams view: aggregate work items across selected Org:Project:Team:AreaPath
+    // combinations (reusing the existing WIQL API) and filter to the selected manager + reports.
+    private async Task<List<(string Name, string Summary)>> GetTeamsWorkItemCollection()
+    {
+        // Require a fetched manager org tree to filter by.
+        if (orgTreeRoot == null)
+        {
+            teamsErrorMessage = "Fetch a manager's reports first to filter Work Items by their team.";
+            this.workItemDetailsCollection = null;
+            return new List<(string Name, string Summary)>();
+        }
+
+        var combinations = ParseSelectedTeamCombinations();
+        if (!combinations.Any())
+        {
+            this.workItemDetailsCollection = null;
+            return new List<(string Name, string Summary)>();
+        }
+
+        teamsErrorMessage = null;
+
+        var startDate = startDateTime ?? DateTime.UtcNow.AddDays(-30);
+        var endDate = endDateTime ?? DateTime.UtcNow;
+
+        // Aggregate work items across all selected combinations, deduped by id.
+        var aggregated = new Dictionary<int, WorkItemValue>();
+        foreach (var (org, project, team, areaPath) in combinations)
+        {
+            var collection = await WorkItemCompletionMetrics.QueryWorkItemDetailsAsync(
+                organizationName: org,
+                projectName: project,
+                teamName: team,
+                areaPath: areaPath,
+                targetState: "Done",
+                startDate: startDate,
+                endDate: endDate);
+
+            if (collection?.value == null)
+            {
+                continue;
+            }
+
+            foreach (var item in collection.value)
+            {
+                aggregated[item.id] = item;
+            }
+        }
+
+        // Filter to only the selected manager + their reports.
+        var (employeeEmails, employeeNames) = BuildManagerEmployeeSets();
+        var filtered = aggregated.Values
+            .Where(w => IsUnderManager(w.fields?.SystemAssignedTo, employeeEmails, employeeNames))
+            .ToList();
+
+        // Store the filtered collection so the per-contributor drill-down and history reuse it.
+        this.workItemDetailsCollection = new WorkItemDetailsCollection
+        {
+            count = filtered.Count,
+            value = filtered,
+        };
+
+        if (!filtered.Any())
+        {
+            return new List<(string Name, string Summary)>();
+        }
+
+        var workItemStatistics = filtered
+            .GroupBy(w => w.fields?.SystemAssignedTo?.displayName ?? "Unassigned")
+            .Select(g => new
+            {
+                Name = g.Key,
+                WorkItemCount = g.Count()
+            })
+            .OrderByDescending(x => x.WorkItemCount)
+            .Select(x => (
+                Name: x.Name,
+                Summary: $"{x.WorkItemCount} work item{(x.WorkItemCount != 1 ? "s" : "")} completed"
+            ))
+            .ToList();
+
+        return workItemStatistics;
+    }
+
+    private List<(string Org, string Project, string Team, string AreaPath)> ParseSelectedTeamCombinations()
+    {
+        var result = new List<(string Org, string Project, string Team, string AreaPath)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var combination in selectedTeamCombinations ?? Enumerable.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(combination) || !seen.Add(combination))
+            {
+                continue;
+            }
+
+            var parts = combination.Split(TeamCombinationSeparator, 4, StringSplitOptions.None);
+            if (parts.Length != 4)
+            {
+                continue;
+            }
+
+            result.Add((parts[0], parts[1], parts[2], parts[3]));
+        }
+
+        return result;
+    }
+
+    private (HashSet<string> Emails, HashSet<string> Names) BuildManagerEmployeeSets()
+    {
+        var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Collect(OrgMember? node)
+        {
+            if (node == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(node.Mail))
+            {
+                emails.Add(node.Mail.Trim());
+            }
+            if (!string.IsNullOrWhiteSpace(node.UserPrincipalName))
+            {
+                emails.Add(node.UserPrincipalName.Trim());
+            }
+            if (!string.IsNullOrWhiteSpace(node.DisplayName))
+            {
+                names.Add(node.DisplayName.Trim());
+            }
+
+            foreach (var report in node.Reports)
+            {
+                Collect(report);
+            }
+        }
+
+        Collect(orgTreeRoot);
+        return (emails, names);
+    }
+
+    private static bool IsUnderManager(ProductivityInsights.Models.WorkItems.SystemAssignedTo? assignee, HashSet<string> emails, HashSet<string> names)
+    {
+        if (assignee == null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(assignee.uniqueName) && emails.Contains(assignee.uniqueName.Trim()))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(assignee.displayName) && names.Contains(assignee.displayName.Trim()))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<List<(string Name, string Summary)>> GetCommitCollection()
@@ -2703,6 +2924,7 @@
     private string selectedOption = "workItems";
     private string selectedView = "details";
     private string selectedTeam = "Cosmos on Azure Job Service";
+    private const string TeamCombinationSeparator = " : ";
     private static readonly string[] teamOptions = new[]
     {
         "Cosmos on Azure Job Service",
@@ -2711,18 +2933,19 @@
         "Job Service V2",
         "Lakehouse Job Execution and Capacities"
     };
-    private HashSet<string> selectedTeams = new HashSet<string> { "Cosmos on Azure Job Service" };
-    private IEnumerable<string> selectedTeamsList = new List<string> { "Cosmos on Azure Job Service" };
-    private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
-    private static readonly string[] areaPathOptions = new[]
+    private static readonly string[] teamCombinationOptions = teamOptions
+        .Select(team => BuildTeamCombination("msdata", "A365", team, GetAreaPathForTeam(team)))
+        .ToArray();
+    private HashSet<string> selectedTeams = new HashSet<string>(new[] { "Cosmos on Azure Job Service" }, StringComparer.OrdinalIgnoreCase);
+    private List<string> selectedTeamCombinations = new List<string>
     {
-        "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure",
-        "A365\\FastSpark",
-        "A365\\JS Reliability",
-        "A365\\Job Service V2",
-        "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"
+        BuildTeamCombination(
+            "msdata",
+            "A365",
+            "Cosmos on Azure Job Service",
+            GetAreaPathForTeam("Cosmos on Azure Job Service"))
     };
-    private IEnumerable<string> selectedAreaPathsList = new List<string> { "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure" };
+    private string selectedAreaPath = "A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure";
     private string selectedGitRepository = "BBC-VHD";
     private string selectedTargetBranch = "master";
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
