@@ -501,6 +501,29 @@
 
     private RenderFragment RenderICMAnalysisForm() => __builder =>
     {
+        @if (selectedView == "teams")
+        {
+            <div class="mb-4">
+                <label class="form-label">Owning Team</label>
+                <div class="team-dd">
+                    <RadzenDropDown @bind-Value="@selectedOwningTeams"
+                                    Data="@owningTeamOptions"
+                                    Multiple="true"
+                                    AllowClear="true"
+                                    AllowSelectAll="true"
+                                    SelectAllText="Select All"
+                                    Placeholder="Select one or more owning teams"
+                                    Change="@OnSelectedOwningTeamsChanged"
+                                    Style="width: 100%;" />
+                </div>
+                @if (selectedOwningTeams == null || !selectedOwningTeams.Any())
+                {
+                    <div class="text-muted small mt-1">Select at least one owning team.</div>
+                }
+            </div>
+        }
+        else
+        {
         <div class="mb-4">
             <label for="owningTeamSelect" class="form-label">Owning Team</label>
             <select id="owningTeamSelect" class="form-select" @bind="selectedOwningTeam">
@@ -510,6 +533,7 @@
                 <option value="SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption">SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption</option>
             </select>
         </div>
+        }
 
         <div class="mb-4">
             <label for="keyVaultUrlSelect" class="form-label">Key Vault URL</label>
@@ -1082,6 +1106,16 @@
         selectedTargetBranch = parts[3];
     }
 
+    private void OnSelectedOwningTeamsChanged(object value)
+    {
+        // Sync the single-selection state to the first selected owning team for reuse.
+        var first = (selectedOwningTeams ?? Enumerable.Empty<string>()).FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(first))
+        {
+            selectedOwningTeam = first;
+        }
+    }
+
     private string GetTargetBranch()
     {
         // Repositories that use "main" branch
@@ -1306,7 +1340,35 @@
         // ICM Resolutions specific
         if (selectedOption == "icmResolutions")
         {
-            html.Append($"<tr><td class='fw-bold'>Owning Team</td><td>{selectedOwningTeam}</td></tr>");
+            if (selectedView == "teams")
+            {
+                var managerLabel = System.Net.WebUtility.HtmlEncode(selectedManager?.displayName ?? "None selected");
+                html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
+
+                var owningTeams = (selectedOwningTeams ?? Enumerable.Empty<string>())
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                html.Append($"<tr><td class='fw-bold'>Selections ({owningTeams.Count})</td><td>");
+                if (owningTeams.Any())
+                {
+                    html.Append("<ul class='mb-0 ps-3'>");
+                    foreach (var owningTeam in owningTeams)
+                    {
+                        html.Append($"<li>{System.Net.WebUtility.HtmlEncode(owningTeam)}</li>");
+                    }
+                    html.Append("</ul>");
+                }
+                else
+                {
+                    html.Append("None selected");
+                }
+                html.Append("</td></tr>");
+            }
+            else
+            {
+                html.Append($"<tr><td class='fw-bold'>Owning Team</td><td>{selectedOwningTeam}</td></tr>");
+            }
             html.Append($"<tr><td class='fw-bold'>Key Vault URL</td><td>{selectedKeyVaultUrl}</td></tr>");
             html.Append($"<tr><td class='fw-bold'>Certificate Name</td><td>{selectedKeyVaultCertificateName}</td></tr>");
         }
@@ -1743,7 +1805,14 @@
                 <thead>
                     <tr>
                         <th colspan="3" class="text-center fw-bold table-title-header">
-                            ICM Incidents Summary for '@selectedOwningTeam'
+                            @if (selectedView == "teams")
+                            {
+                                <text>ICM Incidents Summary under '@(selectedManager?.displayName ?? "selected manager")' across @selectedOwningTeams.Count() owning team(s)</text>
+                            }
+                            else
+                            {
+                                <text>ICM Incidents Summary for '@selectedOwningTeam'</text>
+                            }
                         </th>
                     </tr>
                     <tr>
@@ -2068,6 +2137,11 @@
 
     private async Task<List<(string Name, string Summary)>> GetIncidentCollection()
     {
+        if (selectedView == "teams")
+        {
+            return await GetTeamsIncidentCollection();
+        }
+
         IncidentQueryOptions incidentQueryOptions = GetIncidentQueryOptions();
 
         X509Certificate2 keyvaultCertificate = await KeyVaultUtilities.GetCertificateAsync(
@@ -2143,6 +2217,187 @@
             .ToList();
 
         return incidentStatistics;
+    }
+
+    // ---- Teams view: aggregate ICM incidents across selected owning teams
+    // (reusing the existing IncidentAttendanceMetrics APIs) and filter to the
+    // selected manager + reports.
+    private async Task<List<(string Name, string Summary)>> GetTeamsIncidentCollection()
+    {
+        // Require a fetched manager org tree to filter by.
+        if (orgTreeRoot == null)
+        {
+            teamsErrorMessage = "Fetch a manager's reports first to filter ICM Resolutions by their team.";
+            groupedIncidentsByContributor = null;
+            activeIncidents = null;
+            createdIncidents = null;
+            return new List<(string Name, string Summary)>();
+        }
+
+        var owningTeams = (selectedOwningTeams ?? Enumerable.Empty<string>())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (!owningTeams.Any())
+        {
+            groupedIncidentsByContributor = null;
+            activeIncidents = null;
+            createdIncidents = null;
+            return new List<(string Name, string Summary)>();
+        }
+
+        teamsErrorMessage = null;
+
+        IncidentQueryOptions incidentQueryOptions = GetIncidentQueryOptions();
+
+        X509Certificate2 keyvaultCertificate = await KeyVaultUtilities.GetCertificateAsync(
+            incidentQueryOptions.KeyVaultUrl,
+            incidentQueryOptions.KeyVaultCertificateName);
+
+        // Aggregate each incident category across all selected owning teams, deduped by Id.
+        var resolved = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var mitigated = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var active = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var created = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+
+        void Merge(Dictionary<string, IncidentValue> target, IncidentCollection? source)
+        {
+            if (source?.value == null)
+            {
+                return;
+            }
+            foreach (var incident in source.value)
+            {
+                var key = incident.Id ?? Guid.NewGuid().ToString();
+                target[key] = incident;
+            }
+        }
+
+        foreach (var owningTeam in owningTeams)
+        {
+            Merge(resolved, await IncidentAttendanceMetrics.SearchResolvedIncidentsAsync(
+                keyvaultCertificate, owningTeam, incidentQueryOptions.StartDateTime, incidentQueryOptions.EndDateTime));
+            Merge(mitigated, await IncidentAttendanceMetrics.SearchMitigatedIncidentsAsync(
+                keyvaultCertificate, owningTeam, incidentQueryOptions.StartDateTime, incidentQueryOptions.EndDateTime));
+            Merge(active, await IncidentAttendanceMetrics.SearchAllActiveIncidentsAsync(
+                keyvaultCertificate, owningTeam));
+            Merge(created, await IncidentAttendanceMetrics.SearchCreatedIncidentsAsync(
+                keyvaultCertificate, owningTeam, incidentQueryOptions.StartDateTime, incidentQueryOptions.EndDateTime));
+        }
+
+        activeIncidents = new IncidentCollection { value = active.Values.ToList() };
+        createdIncidents = new IncidentCollection { value = created.Values.ToList() };
+
+        // Manager identity set (alias, display name, email) for filtering.
+        var identitySet = BuildManagerIdentitySet();
+
+        // Combine resolved + mitigated, group by contributor, keep only manager subtree.
+        var allIncidents = new List<IncidentValue>();
+        allIncidents.AddRange(resolved.Values);
+        allIncidents.AddRange(mitigated.Values);
+
+        groupedIncidentsByContributor = new Dictionary<string, IncidentCollection>();
+
+        foreach (var incident in allIncidents)
+        {
+            var changedBy = incident.ResolutionData?.ChangedBy ?? incident.MitigationData?.ChangedBy ?? "Unknown";
+
+            if (!IsIdentityUnderManager(changedBy, identitySet))
+            {
+                continue;
+            }
+
+            if (!groupedIncidentsByContributor.ContainsKey(changedBy))
+            {
+                groupedIncidentsByContributor[changedBy] = new IncidentCollection { value = new List<IncidentValue>() };
+            }
+
+            groupedIncidentsByContributor[changedBy].value?.Add(incident);
+        }
+
+        var incidentStatistics = groupedIncidentsByContributor
+            .Select(g => new
+            {
+                Name = g.Key,
+                TotalIncidents = g.Value.value?.Count ?? 0,
+                ResolvedCount = g.Value.value?.Count(i => i.Status == "Resolved") ?? 0,
+                MitigatedCount = g.Value.value?.Count(i => i.Status == "Mitigated") ?? 0,
+                ActiveCount = activeIncidents?.value?.Count(i => i.OwningContactAlias?.Equals(g.Key, StringComparison.OrdinalIgnoreCase) == true) ?? 0,
+                CreatedCount = createdIncidents?.value?.Count(i => i.OwningContactAlias?.Equals(g.Key, StringComparison.OrdinalIgnoreCase) == true) ?? 0
+            })
+            .OrderByDescending(x => x.TotalIncidents)
+            .Select(x => (
+                Name: x.Name,
+                Summary: $"{x.TotalIncidents} incident{(x.TotalIncidents != 1 ? "s" : "")} closed ({x.ResolvedCount} resolved, {x.MitigatedCount} mitigated, {x.ActiveCount} active, {x.CreatedCount} created)"
+            ))
+            .ToList();
+
+        return incidentStatistics;
+    }
+
+    private HashSet<string> BuildManagerIdentitySet()
+    {
+        var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddIdentity(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var trimmed = value.Trim();
+            identities.Add(trimmed);
+
+            var atIndex = trimmed.IndexOf('@');
+            if (atIndex > 0)
+            {
+                identities.Add(trimmed.Substring(0, atIndex));
+            }
+        }
+
+        void Collect(OrgMember? node)
+        {
+            if (node == null)
+            {
+                return;
+            }
+
+            AddIdentity(node.DisplayName);
+            AddIdentity(node.Mail);
+            AddIdentity(node.UserPrincipalName);
+
+            foreach (var report in node.Reports)
+            {
+                Collect(report);
+            }
+        }
+
+        Collect(orgTreeRoot);
+        return identities;
+    }
+
+    private static bool IsIdentityUnderManager(string? changedBy, HashSet<string> identitySet)
+    {
+        if (string.IsNullOrWhiteSpace(changedBy))
+        {
+            return false;
+        }
+
+        var trimmed = changedBy.Trim();
+        if (identitySet.Contains(trimmed))
+        {
+            return true;
+        }
+
+        var atIndex = trimmed.IndexOf('@');
+        if (atIndex > 0 && identitySet.Contains(trimmed.Substring(0, atIndex)))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<string> GetIncidentAttendanceDetails(string contributorName)
@@ -3292,6 +3547,16 @@
     private Dictionary<string, (string Org, string Project, string Repo, string Branch)> teamsCommitSourceMap =
         new Dictionary<string, (string Org, string Project, string Repo, string Branch)>(StringComparer.OrdinalIgnoreCase);
     private string selectedOwningTeam = "AZURESYNAPSEJOBSERVICE\\JobPlatform";
+
+    // Teams view: multiselect of ICM owning teams.
+    private static readonly string[] owningTeamOptions = new[]
+    {
+        "AZURESYNAPSEJOBSERVICE\\JobPlatform",
+        "AZURESYNAPSEJOBSERVICE\\BBCTeam",
+        "AZURESYNAPSEJOBSERVICE\\CorePlatform",
+        "SPARKCORESERVICES\\SparkCoreWorkload–JobExecutionCapacityConsumption"
+    };
+    private List<string> selectedOwningTeams = new List<string>();
     private string selectedKeyVaultUrl = "https://icm-westus2.vault.azure.net";
     private string selectedKeyVaultCertificateName = "ICM-WestUS2-AME";
     private string selectedTrendPeriod = "daily";
