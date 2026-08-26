@@ -422,6 +422,7 @@
                 }
                 else if (selectedProject == "HDInsight")
                 {
+                    <option value="HDInsight-Main">HDInsight-Main</option>
                     <option value="wildfire-livy">wildfire-livy</option>
                     <option value="wildfire-spark">wildfire-spark</option>
                     <option value="wildfire-delta">wildfire-delta</option>
@@ -430,6 +431,7 @@
                 {
                     <option value="BBC-VHD">BBC-VHD</option>
                     <option value="BBC-Probes">BBC-Probes</option>
+                    <option value="BBC">BBC</option>
                     <option value="SparkRuntimeTSGs">SparkRuntimeTSGs</option>
                     <option value="marlin">marlin</option>
                     <option value="nebula">nebula</option>
@@ -447,6 +449,8 @@
             <select id="targetBranchSelect" class="form-select" @bind="selectedTargetBranch">
                 <option value="main" disabled="@(!IsMainBranchApplicable())">main</option>
                 <option value="master" disabled="@(!IsMasterBranchApplicable())">master</option>
+                <option value="develop" disabled="@(!IsDevelopBranchApplicable())">develop</option>
+                <option value="developer" disabled="@(!IsDeveloperBranchApplicable())">developer</option>
                 <option value="release/3.2" disabled="@(!IsRelease32BranchApplicable())">release/3.2</option>
                 <option value="spark-3.5-mnt" disabled="@(!IsSpark35MntBranchApplicable())">spark-3.5-mnt</option>
             </select>
@@ -1074,6 +1078,14 @@
         {
             return "spark-3.5-mnt";
         }
+        if (gitRepository == "BBC")
+        {
+            return "develop";
+        }
+        if (gitRepository == "HDInsight-Main")
+        {
+            return "developer";
+        }
         if (mainBranchRepos.Contains(gitRepository))
         {
             return "main";
@@ -1140,6 +1152,18 @@
             return "spark-3.5-mnt";
         }
         
+        // BBC defaults to develop branch
+        if (selectedGitRepository == "BBC")
+        {
+            return "develop";
+        }
+
+        // HDInsight-Main defaults to developer branch
+        if (selectedGitRepository == "HDInsight-Main")
+        {
+            return "developer";
+        }
+        
         if (mainBranchRepos.Contains(selectedGitRepository))
         {
             return "main";
@@ -1178,6 +1202,18 @@
     {
         // spark-3.5-mnt branch is only available for wildfire-spark repository
         return selectedGitRepository == "wildfire-spark";
+    }
+
+    private bool IsDevelopBranchApplicable()
+    {
+        // develop branch is only available for BBC repository
+        return selectedGitRepository == "BBC";
+    }
+
+    private bool IsDeveloperBranchApplicable()
+    {
+        // developer branch is only available for HDInsight-Main repository
+        return selectedGitRepository == "HDInsight-Main";
     }
 
     private string GetAreaPathForTeam()
@@ -3525,12 +3561,12 @@
     {
         ("msdata", "A365", new[]
         {
-            "BBC-VHD", "BBC-Probes", "SparkRuntimeTSGs", "marlin", "nebula", "impulse",
+            "BBC-VHD", "BBC-Probes", "BBC", "SparkRuntimeTSGs", "marlin", "nebula", "impulse",
             "spark-driver-adonet", "spark-driver-jdbc", "spark-driver-odbc", "AIAgents"
         }),
         ("msdata", "HDInsight", new[]
         {
-            "wildfire-livy", "wildfire-spark", "wildfire-delta"
+            "HDInsight-Main", "wildfire-livy", "wildfire-spark", "wildfire-delta"
         }),
         ("powerbi", "MWC", new[]
         {
