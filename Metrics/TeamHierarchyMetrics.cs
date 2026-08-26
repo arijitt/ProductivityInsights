@@ -27,9 +27,9 @@
 
         /// <summary>
         /// Searches Azure AD / Entra ID for users whose display name starts with the supplied
-        /// text so the caller can disambiguate and pick the intended manager.
+        /// text or whose directory alias exactly matches it.
         /// </summary>
-        /// <param name="nameQuery">Partial or full display name typed by the user.</param>
+        /// <param name="nameQuery">Partial/full display name or exact directory alias typed by the user.</param>
         /// <returns>A list of matching <see cref="GraphUser"/> (may be empty).</returns>
         public static async Task<List<GraphUser>> SearchManagersAsync(string nameQuery)
         {
@@ -48,41 +48,22 @@
                 httpClient.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Bearer", accessToken.Token);
 
-                // Escape single quotes for the OData filter string literal.
-                string escaped = nameQuery.Trim().Replace("'", "''");
-                string filter = Uri.EscapeDataString($"startswith(displayName,'{escaped}')");
-                string select = Uri.EscapeDataString(SelectFields);
+                string query = nameQuery.Trim();
+                string escaped = query.Replace("'", "''");
+                await AddSearchResultsAsync(
+                    httpClient,
+                    $"startswith(displayName,'{escaped}')",
+                    results);
 
-                string url = $"{GraphBaseUrl}/users?$filter={filter}&$select={select}&$top=15";
-
-#if DEBUG
-                Console.WriteLine($"🔍 Searching Graph users from URL: {url}");
-#endif
-
-                string? nextUrl = url;
-
-                while (!string.IsNullOrEmpty(nextUrl))
+                // Directory aliases do not contain spaces. Keep this as a separate query so
+                // name searches continue working if a tenant restricts alias filtering.
+                if (!query.Any(char.IsWhiteSpace))
                 {
-                    var httpResponse = await httpClient.GetAsync(nextUrl);
-
-                    if (!httpResponse.IsSuccessStatusCode)
-                    {
-                        string errorContent = await httpResponse.Content.ReadAsStringAsync();
-                        Console.WriteLine($"Error searching managers: {httpResponse.StatusCode} - {errorContent}");
-                        break;
-                    }
-
-                    string content = await httpResponse.Content.ReadAsStringAsync();
-                    var collection = JsonSerializer.Deserialize<GraphUserCollection>(content, JsonOptions);
-
-                    if (collection?.value != null)
-                    {
-                        results.AddRange(collection.value);
-                    }
-
-                    // Follow pagination if present (search results are capped at $top above,
-                    // but the API may still paginate).
-                    nextUrl = collection?.odatanextLink;
+                    string alias = query.Split('@', 2)[0].Replace("'", "''");
+                    await AddSearchResultsAsync(
+                        httpClient,
+                        $"mailNickname eq '{alias}'",
+                        results);
                 }
             }
             catch (Exception ex)
@@ -91,8 +72,47 @@
             }
 
             return results
+                .DistinctBy(
+                    u => u.id ?? u.userPrincipalName ?? u.mail ?? u.displayName,
+                    StringComparer.OrdinalIgnoreCase)
                 .OrderBy(u => u.displayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static async Task AddSearchResultsAsync(
+            HttpClient httpClient,
+            string filterExpression,
+            List<GraphUser> results)
+        {
+            string filter = Uri.EscapeDataString(filterExpression);
+            string select = Uri.EscapeDataString(SelectFields);
+            string? nextUrl = $"{GraphBaseUrl}/users?$filter={filter}&$select={select}&$top=15";
+
+#if DEBUG
+            Console.WriteLine($"🔍 Searching Graph users from URL: {nextUrl}");
+#endif
+
+            while (!string.IsNullOrEmpty(nextUrl))
+            {
+                var httpResponse = await httpClient.GetAsync(nextUrl);
+
+                if (!httpResponse.IsSuccessStatusCode)
+                {
+                    string errorContent = await httpResponse.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Error searching managers: {httpResponse.StatusCode} - {errorContent}");
+                    return;
+                }
+
+                string content = await httpResponse.Content.ReadAsStringAsync();
+                var collection = JsonSerializer.Deserialize<GraphUserCollection>(content, JsonOptions);
+
+                if (collection?.value != null)
+                {
+                    results.AddRange(collection.value);
+                }
+
+                nextUrl = collection?.odatanextLink;
+            }
         }
 
         /// <summary>
