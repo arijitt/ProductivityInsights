@@ -11,6 +11,8 @@
 @using System.Security.Cryptography.X509Certificates
 @rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
+@inject IncidentManagementMetrics IncidentManagementMetricsClient
+@inject Microsoft.Extensions.Options.IOptions<IncidentManagementKustoOptions> IncidentManagementKustoSettings
 @inject ProductivityInsights.Services.ThemeService ThemeService
 @implements IAsyncDisposable
 
@@ -25,21 +27,21 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link fs-5 fw-bold @(selectedView == "details" ? "active" : "")" 
                         type="button" 
-                        @onclick="@(() => selectedView = "details")">
+                        @onclick="@(() => OnViewSelected("details"))">
                     Details
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link fs-5 fw-bold @(selectedView == "trends" ? "active" : "")" 
                         type="button" 
-                        @onclick="@(() => selectedView = "trends")">
+                        @onclick="@(() => OnViewSelected("trends"))">
                     Trends
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link fs-5 fw-bold @(selectedView == "teams" ? "active" : "")" 
                         type="button" 
-                        @onclick="@(() => selectedView = "teams")">
+                        @onclick="@(() => OnViewSelected("teams"))">
                     Teams
                 </button>
             </li>
@@ -63,11 +65,21 @@
                         Git Commits
                     </button>
                 </li>
+                @if (ShowIcmResolutionsTab)
+                {
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link fs-5 fw-bold @(selectedOption == "icmResolutions" ? "active" : "")"
+                                type="button"
+                                @onclick="@(() => OnOptionSelected("icmResolutions"))">
+                            ICM Resolutions
+                        </button>
+                    </li>
+                }
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link fs-5 fw-bold @(selectedOption == "icmResolutions" ? "active" : "")" 
-                            type="button" 
-                            @onclick="@(() => OnOptionSelected("icmResolutions"))">
-                        ICM Resolutions
+                    <button class="nav-link fs-5 fw-bold @(selectedOption == "incidentManagement" ? "active" : "")"
+                            type="button"
+                            @onclick="@(() => OnOptionSelected("incidentManagement"))">
+                        Incident Resolutions
                     </button>
                 </li>
             </ul>
@@ -106,6 +118,17 @@
                         @RenderICMAnalysisForm()
                     }
                 </div>
+                <div class="tab-pane fade @(selectedOption == "incidentManagement" ? "show active" : "")" role="tabpanel">
+                    @if (selectedOption == "incidentManagement")
+                    {
+                        @if (selectedView == "teams")
+                        {
+                            @RenderManagerSelection()
+                        }
+                        <h4 class="mb-4">Incident Management Analysis</h4>
+                        @RenderICMAnalysisForm()
+                    }
+                </div>
             </div>
 
             @if (!string.IsNullOrEmpty(analysisResultHtml))
@@ -139,7 +162,7 @@
                         {
                             @RenderWorkItemsResults()
                         }
-                        else if (selectedOption == "icmResolutions")
+                        else if (IsIncidentAnalysisSelected)
                         {
                             @RenderICMIncidentsResults()
                         }
@@ -224,6 +247,8 @@
     public async ValueTask DisposeAsync()
     {
         ThemeService.OnThemeChanged -= OnThemeChanged;
+        incidentManagementCancellation?.Cancel();
+        incidentManagementCancellation?.Dispose();
         if (_jsModule is not null)
         {
             await _jsModule.DisposeAsync();
@@ -539,19 +564,22 @@
         </div>
         }
 
-        <div class="mb-4">
-            <label for="keyVaultUrlSelect" class="form-label">Key Vault URL</label>
-            <select id="keyVaultUrlSelect" class="form-select" @bind="selectedKeyVaultUrl">
-                <option value="https://icm-westus2.vault.azure.net">https://icm-westus2.vault.azure.net</option>
-            </select>
-        </div>
+        @if (selectedOption == "icmResolutions")
+        {
+            <div class="mb-4">
+                <label for="keyVaultUrlSelect" class="form-label">Key Vault URL</label>
+                <select id="keyVaultUrlSelect" class="form-select" @bind="selectedKeyVaultUrl">
+                    <option value="https://icm-westus2.vault.azure.net">https://icm-westus2.vault.azure.net</option>
+                </select>
+            </div>
 
-        <div class="mb-4">
-            <label for="keyVaultCertificateNameSelect" class="form-label">Key Vault Certificate Name</label>
-            <select id="keyVaultCertificateNameSelect" class="form-select" @bind="selectedKeyVaultCertificateName">
-                <option value="ICM-WestUS2-AME">ICM-WestUS2-AME</option>
-            </select>
-        </div>
+            <div class="mb-4">
+                <label for="keyVaultCertificateNameSelect" class="form-label">Key Vault Certificate Name</label>
+                <select id="keyVaultCertificateNameSelect" class="form-select" @bind="selectedKeyVaultCertificateName">
+                    <option value="ICM-WestUS2-AME">ICM-WestUS2-AME</option>
+                </select>
+            </div>
+        }
 
         <div class="datetime-group mb-4">
             <div class="row">
@@ -604,19 +632,52 @@
         // Close analysis results only if switching to a different tab type
         if (selectedOption != option)
         {
+            analysisOperationVersion++;
+            if (selectedOption == "incidentManagement")
+            {
+                incidentManagementCancellation?.Cancel();
+                isLoadingResults = false;
+            }
             CloseAnalysisResults();
             selectedOption = option;
-            
-            // Restore cached results if available for the new tab
-            if (cachedResults.TryGetValue(option, out var cached))
-            {
-                contributors = cached.Contributors;
-                contributorDetails = cached.Details;
-                expandedRows = cached.ExpandedRows;
-                analysisResultHtml = option;
-            }
+            RestoreCachedResults(option, selectedView);
         }
     }
+
+    private void OnViewSelected(string view)
+    {
+        if (selectedView == view)
+        {
+            return;
+        }
+
+        analysisOperationVersion++;
+        if (selectedOption == "incidentManagement")
+        {
+            incidentManagementCancellation?.Cancel();
+        }
+
+        isLoadingResults = false;
+        CloseAnalysisResults();
+        selectedView = view;
+        RestoreCachedResults(selectedOption, view);
+    }
+
+    private void RestoreCachedResults(string option, string view)
+    {
+        if (cachedResults.TryGetValue(GetCacheKey(option, view), out var cached))
+        {
+            contributors = cached.Contributors;
+            contributorDetails = cached.Details;
+            expandedRows = cached.ExpandedRows;
+            analysisResultHtml = option;
+        }
+    }
+
+    private static string GetCacheKey(string option, string view) => $"{view}:{option}";
+
+    private bool IsIncidentAnalysisSelected =>
+        selectedOption == "icmResolutions" || selectedOption == "incidentManagement";
 
     // ---- Teams view (manager org-tree) UI + handlers ----
 
@@ -1298,7 +1359,7 @@
         bool teamsGitCommits = selectedView == "teams" && selectedOption == "gitCommits";
 
         // Common parameters
-        if (selectedOption != "icmResolutions" && !teamsWorkItems && !teamsGitCommits)
+        if (!IsIncidentAnalysisSelected && !teamsWorkItems && !teamsGitCommits)
         {
             html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Organization</td><td>{selectedOrganization}</td></tr>");
             html.Append($"<tr><td class='fw-bold'>Project</td><td>{selectedProject}</td></tr>");
@@ -1373,8 +1434,8 @@
             }
         }
         
-        // ICM Resolutions specific
-        if (selectedOption == "icmResolutions")
+        // Incident analysis specific
+        if (IsIncidentAnalysisSelected)
         {
             if (selectedView == "teams")
             {
@@ -1405,8 +1466,17 @@
             {
                 html.Append($"<tr><td class='fw-bold'>Owning Team</td><td>{selectedOwningTeam}</td></tr>");
             }
-            html.Append($"<tr><td class='fw-bold'>Key Vault URL</td><td>{selectedKeyVaultUrl}</td></tr>");
-            html.Append($"<tr><td class='fw-bold'>Certificate Name</td><td>{selectedKeyVaultCertificateName}</td></tr>");
+            if (selectedOption == "icmResolutions")
+            {
+                html.Append($"<tr><td class='fw-bold'>Key Vault URL</td><td>{selectedKeyVaultUrl}</td></tr>");
+                html.Append($"<tr><td class='fw-bold'>Certificate Name</td><td>{selectedKeyVaultCertificateName}</td></tr>");
+            }
+            else
+            {
+                var kustoOptions = IncidentManagementKustoSettings.Value;
+                html.Append($"<tr><td class='fw-bold'>Kusto Cluster</td><td>{System.Net.WebUtility.HtmlEncode(kustoOptions.ClusterUri)}</td></tr>");
+                html.Append($"<tr><td class='fw-bold'>Kusto Database</td><td>{System.Net.WebUtility.HtmlEncode(kustoOptions.Database)}</td></tr>");
+            }
         }
         
         // Date range (common for all)
@@ -1433,6 +1503,7 @@
             "workItems" => "Work Items Analysis",
             "gitCommits" => "Git Commits Analysis",
             "icmResolutions" => "ICM Resolutions Analysis",
+            "incidentManagement" => "Incident Management Analysis",
             _ => "Unknown Analysis"
         };
     }
@@ -1447,7 +1518,7 @@
         // Cache current results before clearing
         if (!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any())
         {
-            var cacheKey = selectedOption;
+            var cacheKey = GetCacheKey(selectedOption, selectedView);
             cachedResults[cacheKey] = (
                 new List<(string Name, string Summary)>(contributors),
                 new Dictionary<string, string>(contributorDetails),
@@ -1464,9 +1535,22 @@
     private async Task ConfirmAnalysis()
     {
         await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
+        var analysisOption = selectedOption;
+        var operationVersion = ++analysisOperationVersion;
+        CancellationToken incidentManagementCancellationToken = default;
+        IncidentManagementRequest? incidentManagementRequest = null;
+
+        if (analysisOption == "incidentManagement")
+        {
+            incidentManagementCancellation?.Cancel();
+            incidentManagementCancellation?.Dispose();
+            incidentManagementCancellation = new CancellationTokenSource();
+            incidentManagementCancellationToken = incidentManagementCancellation.Token;
+            incidentManagementRequest = CaptureIncidentManagementRequest();
+        }
 
         // Remove cached results for current tab to force fresh analysis
-        var cacheKey = selectedOption;
+        var cacheKey = GetCacheKey(selectedOption, selectedView);
         cachedResults.Remove(cacheKey);
 
         // Close any existing analysis results before starting new analysis
@@ -1615,11 +1699,11 @@
                 }
             });
         }
-        else if (selectedOption == "icmResolutions")
+        else if (analysisOption == "icmResolutions" || analysisOption == "incidentManagement")
         {
             isLoadingResults = true;
             contributors = new List<(string Name, string Summary)>();
-            analysisResultHtml = "icmResolutions";
+            analysisResultHtml = analysisOption;
             StateHasChanged();
             
             try
@@ -1633,19 +1717,56 @@
             {
                 try
                 {
-                    var results = await GetIncidentCollection();
+                    IncidentManagementAnalysisResult? incidentManagementResult = null;
+                    List<(string Name, string Summary)> results;
+
+                    if (analysisOption == "incidentManagement")
+                    {
+                        incidentManagementResult = await GetIncidentManagementCollection(
+                            incidentManagementRequest!,
+                            incidentManagementCancellationToken);
+                        results = incidentManagementResult.Contributors;
+                    }
+                    else
+                    {
+                        results = await GetIncidentCollection();
+                    }
+
                     await InvokeAsync(() =>
                     {
+                        if (operationVersion != analysisOperationVersion || selectedOption != analysisOption)
+                        {
+                            return;
+                        }
+
+                        if (incidentManagementResult != null)
+                        {
+                            incidentManagementGroupedIncidentsByContributor =
+                                incidentManagementResult.GroupedIncidentsByContributor;
+                            incidentManagementActiveIncidents = incidentManagementResult.ActiveIncidents;
+                            incidentManagementCreatedIncidents = incidentManagementResult.CreatedIncidents;
+                            teamsErrorMessage = incidentManagementResult.ErrorMessage;
+                        }
+
                         contributors = results;
                         isLoadingResults = false;
                         StateHasChanged();
                     });
+                }
+                catch (OperationCanceledException) when (incidentManagementCancellationToken.IsCancellationRequested)
+                {
+                    // A newer analysis or tab selection superseded this Kusto request.
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error loading incidents: {ex.Message}");
                     await InvokeAsync(() =>
                     {
+                        if (operationVersion != analysisOperationVersion || selectedOption != analysisOption)
+                        {
+                            return;
+                        }
+
                         isLoadingResults = false;
                         StateHasChanged();
                     });
@@ -1663,7 +1784,12 @@
     {
         
         <div class="table-responsive">
-            <table class="table table-bordered table-sm mb-0">
+            <table class="table table-bordered table-sm mb-0 analysis-summary-table">
+                <colgroup>
+                    <col style="width: 28%;" />
+                    <col style="width: 64%;" />
+                    <col style="width: 8%;" />
+                </colgroup>
                 <thead>
                     <tr>
                         <th colspan="3" class="text-center fw-bold table-title-header">
@@ -1750,7 +1876,12 @@
     {
         
         <div class="table-responsive">
-            <table class="table table-bordered table-sm mb-0">
+            <table class="table table-bordered table-sm mb-0 analysis-summary-table">
+                <colgroup>
+                    <col style="width: 28%;" />
+                    <col style="width: 64%;" />
+                    <col style="width: 8%;" />
+                </colgroup>
                 <thead>
                     <tr>
                         <th colspan="3" class="text-center fw-bold table-title-header">
@@ -1837,7 +1968,12 @@
     {
         
         <div class="table-responsive">
-            <table class="table table-bordered table-sm mb-0">
+            <table class="table table-bordered table-sm mb-0 analysis-summary-table">
+                <colgroup>
+                    <col style="width: 28%;" />
+                    <col style="width: 64%;" />
+                    <col style="width: 8%;" />
+                </colgroup>
                 <thead>
                     <tr>
                         <th colspan="3" class="text-center fw-bold table-title-header">
@@ -1984,7 +2120,7 @@
                                 </th>
                             </tr>
                             <tr>
-                                <th scope="col" style="white-space: nowrap;">Period</th>
+                                <th scope="col">Period</th>
                                 <th scope="col">Pull Requests</th>
                                 <th scope="col">Service Lines Added</th>
                                 <th scope="col">Service Lines Deleted</th>
@@ -1999,7 +2135,7 @@
                             @foreach (var point in trendData)
                             {
                                 <tr class="contributor-row">
-                                    <td class="fw-normal" style="white-space: nowrap;">@point.Period</td>
+                                    <td class="fw-normal">@point.Period</td>
                                     <td>@point.TotalCommits</td>
                                     <td><span class="text-success">+@point.ServiceLinesAdded</span></td>
                                     <td><span class="text-danger">-@point.ServiceLinesDeleted</span></td>
@@ -2263,7 +2399,7 @@
         // Require a fetched manager org tree to filter by.
         if (orgTreeRoot == null)
         {
-            teamsErrorMessage = "Fetch a manager's reports first to filter ICM Resolutions by their team.";
+            teamsErrorMessage = "Fetch a manager's reports first to filter incident data by their team.";
             groupedIncidentsByContributor = null;
             activeIncidents = null;
             createdIncidents = null;
@@ -2372,6 +2508,232 @@
         return incidentStatistics;
     }
 
+    private IncidentManagementRequest CaptureIncidentManagementRequest()
+    {
+        bool isTeamsView = selectedView == "teams";
+        var owningTeams = isTeamsView
+            ? (selectedOwningTeams ?? Enumerable.Empty<string>())
+                .Where(team => !string.IsNullOrWhiteSpace(team))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : new List<string>();
+
+        string? validationError = null;
+        HashSet<string>? managerIdentities = null;
+
+        if (isTeamsView && orgTreeRoot == null)
+        {
+            validationError = "Fetch a manager's reports first to filter Incident Management data by their team.";
+        }
+        else if (isTeamsView && !owningTeams.Any())
+        {
+            validationError = "Select at least one owning team.";
+        }
+        else if (isTeamsView)
+        {
+            managerIdentities = BuildManagerIdentitySet();
+        }
+
+        return new IncidentManagementRequest(
+            isTeamsView,
+            selectedOwningTeam,
+            owningTeams,
+            startDateTime,
+            endDateTime,
+            managerIdentities,
+            validationError);
+    }
+
+    private async Task<IncidentManagementAnalysisResult> GetIncidentManagementCollection(
+        IncidentManagementRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.IsTeamsView)
+        {
+            return await GetTeamsIncidentManagementCollection(request, cancellationToken);
+        }
+
+        var resolvedTask = IncidentManagementMetricsClient.SearchResolvedIncidentsAsync(
+            request.OwningTeam,
+            request.StartDateTime,
+            request.EndDateTime,
+            cancellationToken);
+        var mitigatedTask = IncidentManagementMetricsClient.SearchMitigatedIncidentsAsync(
+            request.OwningTeam,
+            request.StartDateTime,
+            request.EndDateTime,
+            cancellationToken);
+        var activeTask = IncidentManagementMetricsClient.SearchAllActiveIncidentsAsync(
+            request.OwningTeam,
+            cancellationToken);
+        var createdTask = IncidentManagementMetricsClient.SearchCreatedIncidentsAsync(
+            request.OwningTeam,
+            request.StartDateTime,
+            request.EndDateTime,
+            cancellationToken);
+
+        await Task.WhenAll(resolvedTask, mitigatedTask, activeTask, createdTask);
+
+        return BuildIncidentManagementStatistics(
+            await resolvedTask,
+            await mitigatedTask,
+            await activeTask,
+            await createdTask);
+    }
+
+    private async Task<IncidentManagementAnalysisResult> GetTeamsIncidentManagementCollection(
+        IncidentManagementRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(request.ValidationError))
+        {
+            return EmptyIncidentManagementResult(request.ValidationError);
+        }
+
+        var resolved = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var mitigated = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var active = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+        var created = new Dictionary<string, IncidentValue>(StringComparer.OrdinalIgnoreCase);
+
+        static void Merge(
+            Dictionary<string, IncidentValue> target,
+            IncidentCollection? source)
+        {
+            if (source?.value == null)
+            {
+                return;
+            }
+
+            foreach (var incident in source.value)
+            {
+                if (!string.IsNullOrWhiteSpace(incident.Id))
+                {
+                    target[incident.Id] = incident;
+                }
+            }
+        }
+
+        foreach (var owningTeam in request.OwningTeams)
+        {
+            var resolvedTask = IncidentManagementMetricsClient.SearchResolvedIncidentsAsync(
+                owningTeam,
+                request.StartDateTime,
+                request.EndDateTime,
+                cancellationToken);
+            var mitigatedTask = IncidentManagementMetricsClient.SearchMitigatedIncidentsAsync(
+                owningTeam,
+                request.StartDateTime,
+                request.EndDateTime,
+                cancellationToken);
+            var activeTask = IncidentManagementMetricsClient.SearchAllActiveIncidentsAsync(
+                owningTeam,
+                cancellationToken);
+            var createdTask = IncidentManagementMetricsClient.SearchCreatedIncidentsAsync(
+                owningTeam,
+                request.StartDateTime,
+                request.EndDateTime,
+                cancellationToken);
+
+            await Task.WhenAll(resolvedTask, mitigatedTask, activeTask, createdTask);
+
+            Merge(resolved, await resolvedTask);
+            Merge(mitigated, await mitigatedTask);
+            Merge(active, await activeTask);
+            Merge(created, await createdTask);
+        }
+
+        return BuildIncidentManagementStatistics(
+            new IncidentCollection { value = resolved.Values.ToList() },
+            new IncidentCollection { value = mitigated.Values.ToList() },
+            new IncidentCollection { value = active.Values.ToList() },
+            new IncidentCollection { value = created.Values.ToList() },
+            request.ManagerIdentities);
+    }
+
+    private IncidentManagementAnalysisResult BuildIncidentManagementStatistics(
+        IncidentCollection? resolvedIncidents,
+        IncidentCollection? mitigatedIncidents,
+        IncidentCollection? activeIncidentCollection,
+        IncidentCollection? createdIncidentCollection,
+        HashSet<string>? identitySet = null)
+    {
+        var allIncidents = new List<IncidentValue>();
+        if (resolvedIncidents?.value != null)
+        {
+            allIncidents.AddRange(resolvedIncidents.value);
+        }
+        if (mitigatedIncidents?.value != null)
+        {
+            allIncidents.AddRange(mitigatedIncidents.value);
+        }
+
+        var groupedByContributor =
+            new Dictionary<string, IncidentCollection>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var incident in allIncidents)
+        {
+            var changedBy = incident.ResolutionData?.ChangedBy ??
+                incident.MitigationData?.ChangedBy ??
+                "Unknown";
+
+            if (identitySet != null && !IsIdentityUnderManager(changedBy, identitySet))
+            {
+                continue;
+            }
+
+            if (!groupedByContributor.TryGetValue(
+                    changedBy,
+                    out var contributorIncidents))
+            {
+                contributorIncidents = new IncidentCollection { value = new List<IncidentValue>() };
+                groupedByContributor[changedBy] = contributorIncidents;
+            }
+
+            contributorIncidents.value!.Add(incident);
+        }
+
+        var statistics = groupedByContributor
+            .Select(group => new
+            {
+                Name = group.Key,
+                TotalIncidents = group.Value.value?.Count ?? 0,
+                ResolvedCount = group.Value.value?.Count(incident => incident.Status == "Resolved") ?? 0,
+                MitigatedCount = group.Value.value?.Count(incident => incident.Status == "Mitigated") ?? 0,
+                ActiveCount = activeIncidentCollection?.value?.Count(
+                    incident => incident.OwningContactAlias?.Equals(
+                        group.Key,
+                        StringComparison.OrdinalIgnoreCase) == true) ?? 0,
+                CreatedCount = createdIncidentCollection?.value?.Count(
+                    incident => incident.OwningContactAlias?.Equals(
+                        group.Key,
+                        StringComparison.OrdinalIgnoreCase) == true) ?? 0
+            })
+            .OrderByDescending(statistic => statistic.TotalIncidents)
+            .Select(statistic => (
+                Name: statistic.Name,
+                Summary: $"{statistic.TotalIncidents} incident{(statistic.TotalIncidents != 1 ? "s" : "")} closed " +
+                    $"({statistic.ResolvedCount} resolved, {statistic.MitigatedCount} mitigated, " +
+                    $"{statistic.ActiveCount} active, {statistic.CreatedCount} created)"))
+            .ToList();
+
+        return new IncidentManagementAnalysisResult(
+            statistics,
+            groupedByContributor,
+            activeIncidentCollection,
+            createdIncidentCollection,
+            null);
+    }
+
+    private static IncidentManagementAnalysisResult EmptyIncidentManagementResult(string? errorMessage)
+    {
+        return new IncidentManagementAnalysisResult(
+            new List<(string Name, string Summary)>(),
+            null,
+            null,
+            null,
+            errorMessage);
+    }
+
     private HashSet<string> BuildManagerIdentitySet()
     {
         var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2438,12 +2800,16 @@
 
     private async Task<string> GetIncidentAttendanceDetails(string contributorName)
     {
-        if (groupedIncidentsByContributor == null || !groupedIncidentsByContributor.ContainsKey(contributorName))
+        var incidentsByContributor = selectedOption == "incidentManagement"
+            ? incidentManagementGroupedIncidentsByContributor
+            : groupedIncidentsByContributor;
+
+        if (incidentsByContributor == null || !incidentsByContributor.ContainsKey(contributorName))
         {
             return "<div class='incident-entry'><div class='incident-info'><em>No incidents found.</em></div></div>";
         }
 
-        var contributorIncidents = groupedIncidentsByContributor[contributorName].value;
+        var contributorIncidents = incidentsByContributor[contributorName].value;
         if (contributorIncidents == null || !contributorIncidents.Any())
         {
             return $"<div class='incident-entry'><div class='incident-info'><em>No incidents found for {contributorName}.</em></div></div>";
@@ -2465,6 +2831,19 @@
             .GroupBy(i => i.Severity ?? 0)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        // Calculate TTD (Time To Detect) statistics.
+        var timeToDetectBySeverity = orderedIncidents
+            .Where(i => i.ImpactStartDate != default)
+            .Select(i => new
+            {
+                i.Severity,
+                Hours = (i.CreateDate - i.ImpactStartDate).TotalHours
+            })
+            .Where(metric => metric.Hours >= 0)
+            .GroupBy(metric => metric.Severity)
+            .OrderBy(group => group.Key ?? int.MaxValue)
+            .ToList();
+
         // Calculate TTR (Time To Resolve) statistics
         var timeToResolveList = new List<double>();
         foreach (var incident in orderedIncidents.Where(i => i.Status == "Resolved" && i.ResolutionData != null))
@@ -2475,6 +2854,17 @@
                 timeToResolveList.Add(ttr);
             }
         }
+        var timeToResolveBySeverity = orderedIncidents
+            .Where(i => i.Status == "Resolved" && i.ResolutionData != null)
+            .Select(i => new
+            {
+                i.Severity,
+                Hours = (i.ResolutionData!.Date - i.CreateDate).TotalHours
+            })
+            .Where(metric => metric.Hours >= 0)
+            .GroupBy(metric => metric.Severity)
+            .OrderBy(group => group.Key ?? int.MaxValue)
+            .ToList();
 
         // Calculate TTM (Time To Mitigate) statistics
         var timeToMitigateList = new List<double>();
@@ -2486,6 +2876,17 @@
                 timeToMitigateList.Add(ttm);
             }
         }
+        var timeToMitigateBySeverity = orderedIncidents
+            .Where(i => i.MitigationData != null)
+            .Select(i => new
+            {
+                i.Severity,
+                Hours = (i.MitigationData!.Date - i.CreateDate).TotalHours
+            })
+            .Where(metric => metric.Hours >= 0)
+            .GroupBy(metric => metric.Severity)
+            .OrderBy(group => group.Key ?? int.MaxValue)
+            .ToList();
 
         // Add contributor summary header
         details.Append("<div class='contributor-summary mb-3 p-3' style='background-color: var(--bs-secondary-bg); border-left: 4px solid var(--bs-primary); border-radius: 4px;'>")
@@ -2496,17 +2897,85 @@
 
         if (incidentsBySeverity.Any())
         {
-            details.Append("<div class='mt-2'><strong>By Severity:</strong></div>")
-                   .Append("<div style='margin-left: 20px;'>");
-            foreach (var sev in incidentsBySeverity.OrderBy(kvp => kvp.Key))
+            if (selectedOption == "incidentManagement")
             {
-                details.Append($"<div>Severity {sev.Key}: {sev.Value}</div>");
+                details.Append("<div class='mt-2'><strong>By Severity:</strong></div>")
+                       .Append("<div class='incident-metrics-wrapper mt-2'>")
+                       .Append("<table class='table table-sm table-bordered mb-0 incident-metrics-table'>")
+                       .Append("<thead><tr><th>Severity</th><th>Incident Count</th></tr></thead>")
+                       .Append("<tbody>");
+
+                foreach (var severity in incidentsBySeverity.OrderBy(entry => entry.Key))
+                {
+                    details.Append("<tr>")
+                           .Append($"<td>Severity {severity.Key}</td>")
+                           .Append($"<td>{severity.Value}</td>")
+                           .Append("</tr>");
+                }
+
+                details.Append("</tbody></table></div>");
             }
-            details.Append("</div>");
+            else
+            {
+                details.Append("<div class='mt-2'><strong>By Severity:</strong></div>")
+                       .Append("<div style='margin-left: 20px;'>");
+                foreach (var severity in incidentsBySeverity.OrderBy(entry => entry.Key))
+                {
+                    details.Append($"<div>Severity {severity.Key}: {severity.Value}</div>");
+                }
+                details.Append("</div>");
+            }
         }
 
-        // Add TTM statistics
-        if (timeToMitigateList.Any())
+        if (selectedOption == "incidentManagement" && timeToDetectBySeverity.Any())
+        {
+            details.Append("<div class='mt-2'><strong>🔎 Time To Detect (TTD) by Severity:</strong></div>")
+                   .Append("<div class='incident-metrics-wrapper mt-2'>")
+                   .Append("<table class='table table-sm table-bordered mb-0 incident-metrics-table'>")
+                   .Append("<thead><tr><th>Severity</th><th>Minimum</th><th>Average</th><th>Maximum</th></tr></thead>")
+                   .Append("<tbody>");
+
+            foreach (var severityGroup in timeToDetectBySeverity)
+            {
+                var values = severityGroup.Select(metric => metric.Hours).ToList();
+                var severityLabel = severityGroup.Key?.ToString() ?? "Unknown";
+
+                details.Append("<tr>")
+                       .Append($"<td>Severity {severityLabel}</td>")
+                       .Append($"<td>{FormatTTR(values.Min())}</td>")
+                       .Append($"<td>{FormatTTR(values.Average())}</td>")
+                       .Append($"<td>{FormatTTR(values.Max())}</td>")
+                       .Append("</tr>");
+            }
+
+            details.Append("</tbody></table></div>");
+        }
+
+        // Incident Resolutions shows TTM statistics separately for each severity.
+        if (selectedOption == "incidentManagement" && timeToMitigateBySeverity.Any())
+        {
+            details.Append("<div class='mt-2'><strong>⚡ Time To Mitigate (TTM) by Severity:</strong></div>")
+                   .Append("<div class='incident-metrics-wrapper mt-2'>")
+                   .Append("<table class='table table-sm table-bordered mb-0 incident-metrics-table'>")
+                   .Append("<thead><tr><th>Severity</th><th>Minimum</th><th>Average</th><th>Maximum</th></tr></thead>")
+                   .Append("<tbody>");
+
+            foreach (var severityGroup in timeToMitigateBySeverity)
+            {
+                var values = severityGroup.Select(metric => metric.Hours).ToList();
+                var severityLabel = severityGroup.Key?.ToString() ?? "Unknown";
+
+                details.Append("<tr>")
+                       .Append($"<td>Severity {severityLabel}</td>")
+                       .Append($"<td>{FormatTTR(values.Min())}</td>")
+                       .Append($"<td>{FormatTTR(values.Average())}</td>")
+                       .Append($"<td>{FormatTTR(values.Max())}</td>")
+                       .Append("</tr>");
+            }
+
+            details.Append("</tbody></table></div>");
+        }
+        else if (timeToMitigateList.Any())
         {
             var minTTM = timeToMitigateList.Min();
             var maxTTM = timeToMitigateList.Max();
@@ -2520,8 +2989,31 @@
                    .Append("</div>");
         }
 
-        // Add TTR statistics
-        if (timeToResolveList.Any())
+        // Incident Resolutions shows TTR statistics separately for each severity.
+        if (selectedOption == "incidentManagement" && timeToResolveBySeverity.Any())
+        {
+            details.Append("<div class='mt-2'><strong>⏱️ Time To Resolve (TTR) by Severity:</strong></div>")
+                   .Append("<div class='incident-metrics-wrapper mt-2'>")
+                   .Append("<table class='table table-sm table-bordered mb-0 incident-metrics-table'>")
+                   .Append("<thead><tr><th>Severity</th><th>Minimum</th><th>Average</th><th>Maximum</th></tr></thead>")
+                   .Append("<tbody>");
+
+            foreach (var severityGroup in timeToResolveBySeverity)
+            {
+                var values = severityGroup.Select(metric => metric.Hours).ToList();
+                var severityLabel = severityGroup.Key?.ToString() ?? "Unknown";
+
+                details.Append("<tr>")
+                       .Append($"<td>Severity {severityLabel}</td>")
+                       .Append($"<td>{FormatTTR(values.Min())}</td>")
+                       .Append($"<td>{FormatTTR(values.Average())}</td>")
+                       .Append($"<td>{FormatTTR(values.Max())}</td>")
+                       .Append("</tr>");
+            }
+
+            details.Append("</tbody></table></div>");
+        }
+        else if (timeToResolveList.Any())
         {
             var minTTR = timeToResolveList.Min();
             var maxTTR = timeToResolveList.Max();
@@ -2554,7 +3046,7 @@
             var mitigatedByName = incident.MitigationData?.ChangedBy ?? "Unknown";
             var resolvedByName = incident.ResolutionData?.ChangedBy ?? "Unknown";
 
-            details.Append("<div class='incident-entry'>")
+            details.Append("<div class='incident-entry' style='box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; word-break: break-word;'>")
                    .Append($"<div class='incident-header'>🚨 <strong>Incident:</strong> <span class='incident-id'>#{incidentId}</span> - Severity {severity}</div>")
                    .Append($"<div class='incident-info'>📋 <strong>Title:</strong> {System.Web.HttpUtility.HtmlEncode(title)}</div>")
                    .Append($"<div class='incident-info'>📊 <strong>Status:</strong> <span class='badge bg-{statusBadgeClass}'>{status}</span></div>")
@@ -3525,9 +4017,27 @@
     Dictionary<string, IncidentCollection>? groupedIncidentsByContributor = null;
     IncidentCollection? activeIncidents = null;
     IncidentCollection? createdIncidents = null;
+    Dictionary<string, IncidentCollection>? incidentManagementGroupedIncidentsByContributor = null;
+    IncidentCollection? incidentManagementActiveIncidents = null;
+    IncidentCollection? incidentManagementCreatedIncidents = null;
+    private sealed record IncidentManagementAnalysisResult(
+        List<(string Name, string Summary)> Contributors,
+        Dictionary<string, IncidentCollection>? GroupedIncidentsByContributor,
+        IncidentCollection? ActiveIncidents,
+        IncidentCollection? CreatedIncidents,
+        string? ErrorMessage);
+    private sealed record IncidentManagementRequest(
+        bool IsTeamsView,
+        string OwningTeam,
+        IReadOnlyList<string> OwningTeams,
+        DateTime? StartDateTime,
+        DateTime? EndDateTime,
+        HashSet<string>? ManagerIdentities,
+        string? ValidationError);
 
     private string selectedOrganization = "msdata";
     private string selectedProject = "A365";
+    private static readonly bool ShowIcmResolutionsTab = false;
     private string selectedOption = "workItems";
     private string selectedView = "details";
     private string selectedTeam = "Cosmos on Azure Job Service";
@@ -3610,6 +4120,8 @@
     private int trendProgressCurrent = 0;
     private int trendProgressTotal = 0;
     private string selectedTrendTab = "table";
+    private int analysisOperationVersion = 0;
+    private CancellationTokenSource? incidentManagementCancellation = null;
 
     // ---- Teams view (manager org-tree) state ----
     private string managerSearchText = string.Empty;

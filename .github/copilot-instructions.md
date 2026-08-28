@@ -24,11 +24,12 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 
 ### Core Flow
 
-1. **Components/Pages/AnalysisOptions.razor** - Main UI page with three analysis tabs (Work Items, Git Commits, ICM Resolutions)
+1. **Components/Pages/AnalysisOptions.razor** - Main UI page with four analysis tabs (Work Items, Git Commits, ICM Resolutions, Incident Management)
 2. **Metrics/** - Static classes that call external APIs and return typed collections:
    - `GitCommitMetrics` → Azure DevOps Git API
    - `WorkItemCompletionMetrics` → Azure DevOps Work Item Tracking API (WIQL)
    - `IncidentAttendanceMetrics` → ICM OData API
+   - `IncidentManagementMetrics` → Azure Data Explorer (`IcmDataWarehouse`)
 3. **Models/** - DTOs for deserializing API responses (use lowercase property names matching JSON)
 4. **Options/** - Query parameter classes passed from UI to metrics classes
 
@@ -36,6 +37,7 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 
 - **Azure DevOps**: Uses `DefaultAzureCredential` via `Utilities/UserToken.cs` with token caching (15-min buffer)
 - **ICM**: Certificate-based auth via `Utilities/KeyVaultUtilities.cs`, retrieves X.509 certs from Azure Key Vault
+- **Incident Management Kusto**: Uses `DefaultAzureCredential`; cluster and database come from the `IncidentManagementKusto` configuration section
 
 ### Services
 
@@ -45,7 +47,7 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 
 ### API Calls
 
-- All external API calls are `async` static methods in `Metrics/` classes
+- External data calls are asynchronous methods in `Metrics/` classes; reusable configured clients may be registered through DI
 - Use `HttpClient` with Bearer token (Azure DevOps) or client certificate (ICM)
 - Handle pagination with continuation tokens; collect all pages into a single collection
 - Return `null` on API failure after logging error to console

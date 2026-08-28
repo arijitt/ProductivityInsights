@@ -180,6 +180,60 @@ h1:focus {
     margin-bottom: 1rem;
 }
 
+/* MarkupString content does not receive Blazor's scoped CSS attribute. */
+.main-panel .analysis-results .table-responsive,
+.main-panel .analysis-results .incident-metrics-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: visible !important;
+}
+
+.main-panel .analysis-results table.table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+}
+
+.main-panel .analysis-results table.table th,
+.main-panel .analysis-results table.table td {
+    min-width: 0 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+}
+
+.main-panel .analysis-results .details-row > td {
+    max-width: 0;
+}
+
+.main-panel .analysis-results .commit-details {
+    box-sizing: border-box;
+    width: calc(100% - 1rem);
+    max-width: calc(100% - 1rem);
+    min-width: 0;
+    overflow: visible;
+}
+
+.main-panel .analysis-results .incident-entry,
+.main-panel .analysis-results .incident-header,
+.main-panel .analysis-results .incident-info {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+}
+
+.main-panel .analysis-results .incident-info a {
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-all !important;
+}
+
 /* Dark Mode Styles */
 html[data-bs-theme="dark"] {
     color-scheme: dark;

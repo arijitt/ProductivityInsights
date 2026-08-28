@@ -28,6 +28,12 @@ A comprehensive Blazor-based web application for analyzing team productivity met
 - View active and created incidents by owner
 - Detailed incident history with resolution information
 
+### 🛠️ Incident Management Analysis
+- Query incident data from Azure Data Explorer
+- Preserve active, created, mitigated, and resolved incident views
+- Support Details, Trends, and Teams manager filtering
+- Use configuration-based Kusto cluster and database settings
+
 ## Technology Stack
 
 - **Framework**: .NET 8.0
@@ -37,6 +43,7 @@ A comprehensive Blazor-based web application for analyzing team productivity met
 - **APIs**: 
   - Azure DevOps REST API (v7.0)
   - ICM REST API
+  - Azure Data Explorer / Kusto
 - **Security**: Azure Key Vault for certificate management
 
 ## Prerequisites
@@ -128,6 +135,14 @@ The application uses Azure Interactive Browser Credential for authentication. On
 5. Click **Run Analysis**
 6. View incident resolution metrics including TTR and TTM
 7. Expand rows for detailed incident information
+
+### Analyzing Incidents from Kusto
+1. Navigate to the **Incident Management** tab
+2. Select an owning team
+3. Set the date range
+4. Click **Run Analysis**
+5. View active, created, mitigated, and resolved incident metrics
+6. Expand rows for detailed incident information
 
 ## Project Structure
 

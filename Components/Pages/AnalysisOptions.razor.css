@@ -565,6 +565,9 @@ select.form-select:hover {
 }
 
 .analysis-results .table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
     background: rgba(255, 255, 255, 0.35);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
@@ -589,6 +592,44 @@ select.form-select:hover {
 .analysis-results .table td,
 .analysis-results .table th {
     border-color: rgba(13, 110, 253, 0.12);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.main-panel .table-responsive {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.main-panel ::deep .incident-metrics-wrapper,
+.main-panel ::deep .incident-entry {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+.main-panel ::deep .incident-metrics-table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+}
+
+.main-panel ::deep .incident-metrics-table th,
+.main-panel ::deep .incident-metrics-table td,
+.main-panel ::deep .incident-header,
+.main-panel ::deep .incident-info {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.main-panel ::deep .incident-info a {
+    overflow-wrap: anywhere;
+    word-break: break-all;
 }
 
 [data-bs-theme="dark"] .analysis-results {
