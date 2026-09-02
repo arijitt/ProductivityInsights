@@ -137,6 +137,8 @@ namespace ProductivityInsights.Models.Incidents
 
         public string? OwningTeamId { get; set; }
 
+        public string? OwningTeamName { get; set; }
+
         public MitigationData? MitigationData { get; set; }
 
         public ResolutionData? ResolutionData { get; set; }
@@ -224,4 +226,3 @@ namespace ProductivityInsights.Models.Incidents
         public bool IsCustomerSupportEngagement { get; set; }
     }
 }
-

@@ -24,20 +24,18 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 
 ### Core Flow
 
-1. **Components/Pages/AnalysisOptions.razor** - Main UI page with four analysis tabs (Work Items, Git Commits, ICM Resolutions, Incident Management)
+1. **Components/Pages/AnalysisOptions.razor** - Main UI page with three analysis tabs (Work Items, Git Commits, Incident Resolutions)
 2. **Metrics/** - Static classes that call external APIs and return typed collections:
    - `GitCommitMetrics` → Azure DevOps Git API
    - `WorkItemCompletionMetrics` → Azure DevOps Work Item Tracking API (WIQL)
-   - `IncidentAttendanceMetrics` → ICM OData API
-   - `IncidentManagementMetrics` → Azure Data Explorer (`IcmDataWarehouse`)
+   - `IncidentManagementMetrics` → Azure Data Explorer (`IcmDataWarehouse`) for Incident Resolutions
 3. **Models/** - DTOs for deserializing API responses (use lowercase property names matching JSON)
 4. **Options/** - Query parameter classes passed from UI to metrics classes
 
 ### Authentication
 
 - **Azure DevOps**: Uses `DefaultAzureCredential` via `Utilities/UserToken.cs` with token caching (15-min buffer)
-- **ICM**: Certificate-based auth via `Utilities/KeyVaultUtilities.cs`, retrieves X.509 certs from Azure Key Vault
-- **Incident Management Kusto**: Uses `DefaultAzureCredential`; cluster and database come from the `IncidentManagementKusto` configuration section
+- **Incident Resolutions**: Uses `DefaultAzureCredential`; cluster and database come from the `IncidentManagementKusto` configuration section
 
 ### Services
 

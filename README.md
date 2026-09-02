@@ -21,18 +21,14 @@ A comprehensive Blazor-based web application for analyzing team productivity met
 - Support for multiple repositories and branches
 - Distinguish between added, edited, and deleted files
 
-### 🚨 ICM Resolutions Analysis
+### 🚨 Incident Resolutions Analysis
+- Query incident data from Azure Data Explorer
 - Monitor incident resolution and mitigation metrics
-- Track time-to-resolve (TTR) and time-to-mitigate (TTM)
+- Track time-to-detect (TTD), time-to-mitigate (TTM), and time-to-resolve (TTR)
 - Analyze incidents by severity and status
 - View active and created incidents by owner
-- Detailed incident history with resolution information
-
-### 🛠️ Incident Management Analysis
-- Query incident data from Azure Data Explorer
-- Preserve active, created, mitigated, and resolved incident views
 - Support Details, Trends, and Teams manager filtering
-- Use configuration-based Kusto cluster and database settings
+- View detailed active, mitigated, and resolved incident information
 
 ## Technology Stack
 
@@ -42,15 +38,13 @@ A comprehensive Blazor-based web application for analyzing team productivity met
 - **Authentication**: Azure Identity with Interactive Browser Credential
 - **APIs**: 
   - Azure DevOps REST API (v7.0)
-  - ICM REST API
   - Azure Data Explorer / Kusto
-- **Security**: Azure Key Vault for certificate management
 
 ## Prerequisites
 
 - .NET 8.0 SDK or later
 - Azure DevOps account with appropriate permissions
-- Azure subscription with Key Vault access (for ICM analysis)
+- Access to the configured Azure Data Explorer incident warehouse
 - Valid Azure AD credentials
 
 ## Installation
@@ -96,17 +90,17 @@ The application connects to Azure DevOps organizations and projects. Configure a
 - **Projects**: A365, HDInsight, MWC
 - **Teams**: Cosmos on Azure Job Service, FastSpark, JS Reliability, etc.
 
-### ICM Settings
+### Incident Resolutions Settings
 For incident analysis, configure:
-- **Key Vault URL**: Azure Key Vault endpoint
-- **Certificate Name**: Certificate for ICM authentication
+- **Kusto Cluster**: Azure Data Explorer cluster URI in `appsettings.json`
+- **Kusto Database**: Incident warehouse database in `appsettings.json`
 - **Owning Teams**: Team paths in ICM
 
 ### Authentication
 The application uses Azure Interactive Browser Credential for authentication. On first run:
 1. A browser window will open for Azure AD sign-in
 2. Sign in with your Microsoft credentials
-3. Grant necessary permissions for Azure DevOps and Key Vault access
+3. Grant necessary permissions for Azure DevOps and Azure Data Explorer access
 
 ## Usage
 
@@ -127,21 +121,12 @@ The application uses Azure Interactive Browser Credential for authentication. On
 6. View commit statistics with line changes per contributor
 7. Expand rows to see individual commits with file-level details
 
-### Analyzing ICM Incidents
-1. Navigate to the **ICM Resolutions** tab
-2. Select owning team
-3. Configure Key Vault settings
-4. Set date range
-5. Click **Run Analysis**
-6. View incident resolution metrics including TTR and TTM
-7. Expand rows for detailed incident information
-
-### Analyzing Incidents from Kusto
-1. Navigate to the **Incident Management** tab
+### Analyzing Incident Resolutions
+1. Navigate to the **Incident Resolutions** tab
 2. Select an owning team
 3. Set the date range
 4. Click **Run Analysis**
-5. View active, created, mitigated, and resolved incident metrics
+5. View active, created, mitigated, and resolved incident metrics, including TTD, TTM, and TTR
 6. Expand rows for detailed incident information
 
 ## Project Structure
@@ -153,7 +138,7 @@ ProductivityInsights/
 │   └── Pages/            # Razor pages (AnalysisOptions, Home, etc.)
 ├── Metrics/              # Business logic for metrics calculation
 │   ├── GitCommitMetrics.cs
-│   ├── IncidentAttendanceMetrics.cs
+│   ├── IncidentManagementMetrics.cs
 │   └── WorkItemCompletionMetrics.cs
 ├── Models/               # Data models and DTOs
 │   ├── CommitCollection.cs
@@ -162,13 +147,12 @@ ProductivityInsights/
 │   └── ...
 ├── Options/              # Query options classes
 │   ├── CommitQueryOptions.cs
-│   ├── IncidentQueryOptions.cs
+│   ├── IncidentManagementKustoOptions.cs
 │   └── WorkItemQueryOptions.cs
 ├── Services/             # Application services
 │   └── ThemeService.cs
 ├── Utilities/            # Helper utilities
 │   ├── FormatUtilities.cs
-│   ├── KeyVaultUtilities.cs
 │   ├── PrintUtilities.cs
 │   └── UserToken.cs
 ├── wwwroot/              # Static files (CSS, JS)
@@ -202,10 +186,9 @@ The application uses the following endpoints:
 - Work Items: `/wit/wiql` and `/wit/workitems`
 - File Diffs: `/_versioncontrol/fileDiff`
 
-### ICM REST API
-- Search incidents by status and date range
-- Retrieve incident details including resolution/mitigation data
-- Certificate-based authentication via Azure Key Vault
+### Azure Data Explorer
+- Queries active, created, mitigated, and resolved incidents from `IcmDataWarehouse`
+- Uses `DefaultAzureCredential` and configured Kusto cluster/database settings
 
 ## Performance Considerations
 
@@ -219,7 +202,7 @@ The application uses the following endpoints:
 ### Authentication Issues
 - Ensure you have appropriate permissions in Azure DevOps
 - Check Azure AD credentials and consent
-- Verify Key Vault access for ICM analysis
+- Verify Azure Data Explorer access for Incident Resolutions analysis
 
 ### API Errors
 - Check network connectivity
