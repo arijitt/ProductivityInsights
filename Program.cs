@@ -2,6 +2,7 @@ using ProductivityInsights.Components;
 using ProductivityInsights.Metrics;
 using ProductivityInsights.Options;
 using ProductivityInsights.Services;
+using ProductivityInsights.Services.Reports;
 using Radzen;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,6 +26,7 @@ builder.Services.AddOptions<IncidentManagementKustoOptions>()
         "IncidentManagementKusto:QueryTimeoutSeconds must be greater than zero.")
     .ValidateOnStart();
 builder.Services.AddSingleton<IncidentManagementMetrics>();
+builder.Services.AddReportExports(builder.Configuration);
 
 var app = builder.Build();
 

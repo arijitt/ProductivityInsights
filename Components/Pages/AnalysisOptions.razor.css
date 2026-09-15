@@ -511,7 +511,7 @@ select.form-select:hover {
     position: relative;
 }
 
-.analysis-pdf-btn {
+.analysis-export-btn {
     background: rgba(13, 110, 253, 0.15);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -520,10 +520,15 @@ select.form-select:hover {
     transition: all 0.3s ease;
 }
 
-.analysis-pdf-btn:hover {
+.analysis-export-btn:hover {
     background: rgba(13, 110, 253, 0.3);
     border-color: rgba(13, 110, 253, 0.5);
     color: #0d6efd;
+}
+
+.report-export-status {
+    margin-top: 3rem;
+    overflow-wrap: anywhere;
 }
 
 .analysis-close-btn {

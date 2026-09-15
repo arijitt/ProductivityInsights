@@ -115,20 +115,35 @@
                     <button class="btn btn-sm analysis-close-btn" @onclick="CloseAnalysisResults" aria-label="Close results">
                         <span aria-hidden="true">×</span>
                     </button>
-                    <button class="btn btn-sm analysis-pdf-btn"
-                            @onclick="DownloadAsPdf"
-                            disabled="@isGeneratingPdf"
+                    <button class="btn btn-sm analysis-export-btn"
+                            @ref="reportExportButton"
+                            data-report-run="@(displayedExportRun?.Request.RunId.ToString("N"))"
+                            data-report-file-name="@SuggestedReportFileName"
+                            data-report-ready="@(CanExportReports ? "true" : "false")"
+                            disabled="@(!CanExportReports || !reportPickerReady)"
                             style="position: absolute; top: 1rem; right: calc(3rem + 32px); z-index: 10; padding-bottom: 0.5rem; display: inline-flex; align-items: center; justify-content: center;">
-                        @if (isGeneratingPdf)
+                        @if (isExportingReports)
                         {
                             <span class="spinner-border spinner-border-sm me-1" role="status"></span>
-                            <span>Generating...</span>
+                            <span>Exporting...</span>
                         }
                         else
                         {
-                            <span>📥 PDF</span>
+                            <span>📥 Export Reports (.md + .html)</span>
                         }
                     </button>
+                    @if (!string.IsNullOrEmpty(reportExportError))
+                    {
+                        <div class="alert alert-warning report-export-status" role="alert">@reportExportError</div>
+                    }
+                    else if (isExportingReports)
+                    {
+                        <div class="report-export-status" role="status">@reportExportProgress</div>
+                    }
+                    else if (selectedView == "trends" && selectedOption != "gitCommits")
+                    {
+                        <div class="report-export-status">This trend view has no underlying period data. Export its Details or Teams analysis instead.</div>
+                    }
                     @if (selectedView == "details" || selectedView == "teams")
                     {
                         <div style="margin-top: 2.5rem;">
@@ -214,23 +229,12 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private IJSObjectReference? _jsModule;
-
-    private async Task<IJSObjectReference> GetJsModule()
-    {
-        _jsModule ??= await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./theme.module.js");
-        return _jsModule;
-    }
-
     public async ValueTask DisposeAsync()
     {
         ThemeService.OnThemeChanged -= OnThemeChanged;
         incidentManagementCancellation?.Cancel();
         incidentManagementCancellation?.Dispose();
-        if (_jsModule is not null)
-        {
-            await _jsModule.DisposeAsync();
-        }
+        await DisposeReportExportAsync();
     }
 
     private RenderFragment RenderAnalysisForm() => __builder =>
@@ -633,6 +637,7 @@
             contributorDetails = cached.Details;
             expandedRows = cached.ExpandedRows;
             analysisResultHtml = option;
+            RestoreReportExportContext(GetCacheKey(option, view));
         }
     }
 
@@ -1273,6 +1278,7 @@
         }
 
         analysisParameters = BuildAnalysisParametersHtml();
+        HideReportExportContext(false);
         analysisResultHtml = string.Empty;
         await JSRuntime.InvokeVoidAsync("showModal", "analysisModal");
     }
@@ -1464,6 +1470,7 @@
 
     private void CloseAnalysisResults()
     {
+        HideReportExportContext(!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any());
         // Cache current results before clearing
         if (!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any())
         {
@@ -1486,6 +1493,7 @@
         await JSRuntime.InvokeVoidAsync("hideModal", "analysisModal");
         var analysisOption = selectedOption;
         var operationVersion = ++analysisOperationVersion;
+        BeginReportExportContext(operationVersion);
         CancellationToken incidentManagementCancellationToken = default;
         IncidentManagementRequest? incidentManagementRequest = null;
 
@@ -1574,6 +1582,7 @@
                                 trendData = BuildTrendData(gitCommitCollection!);
                                 trendProgressTotal = 0;
                                 isLoadingResults = false;
+                                CompleteReportExportContext(operationVersion);
                                 StateHasChanged();
                             });
                         }
@@ -1583,6 +1592,7 @@
                             {
                                 trendData = new List<CommitTrendDataPoint>();
                                 isLoadingResults = false;
+                                CompleteReportExportContext(operationVersion);
                                 StateHasChanged();
                             });
                         }
@@ -1594,6 +1604,7 @@
                         {
                             contributors = results;
                             isLoadingResults = false;
+                            CompleteReportExportContext(operationVersion);
                             StateHasChanged();
                         });
                     }
@@ -1604,6 +1615,7 @@
                     await InvokeAsync(() =>
                     {
                         isLoadingResults = false;
+                        CompleteReportExportContext(operationVersion, false);
                         StateHasChanged();
                     });
                 }
@@ -1634,6 +1646,7 @@
                     {
                         contributors = results;
                         isLoadingResults = false;
+                        CompleteReportExportContext(operationVersion);
                         StateHasChanged();
                     });
                 }
@@ -1643,6 +1656,7 @@
                     await InvokeAsync(() =>
                     {
                         isLoadingResults = false;
+                        CompleteReportExportContext(operationVersion, false);
                         StateHasChanged();
                     });
                 }
@@ -1684,6 +1698,7 @@
 
                         contributors = results;
                         isLoadingResults = false;
+                        CompleteReportExportContext(operationVersion, string.IsNullOrEmpty(incidentManagementResult.ErrorMessage));
                         StateHasChanged();
                     });
                 }
@@ -1702,6 +1717,7 @@
                         }
 
                         isLoadingResults = false;
+                        CompleteReportExportContext(operationVersion, false);
                         StateHasChanged();
                     });
                 }
@@ -2184,63 +2200,6 @@
     }
 
     
-    private async Task DownloadAsPdf()
-    {
-        isGeneratingPdf = true;
-        StateHasChanged();
-
-        try
-        {
-            // Auto-expand all rows and load details
-            var originalExpandedRows = new HashSet<string>(expandedRows);
-
-            foreach (var contributor in contributors)
-            {
-                if (!expandedRows.Contains(contributor.Name))
-                {
-                    expandedRows.Add(contributor.Name);
-
-                    if (!contributorDetails.ContainsKey(contributor.Name))
-                    {
-                        string details;
-                        if (selectedOption == "workItems")
-                        {
-                            details = await GetWorkContributionDetails(contributor.Name);
-                        }
-                        else if (selectedOption == "gitCommits")
-                        {
-                            details = await GetCodeContributionDetails(contributor.Name);
-                        }
-                        else
-                        {
-                            details = await GetIncidentDetails(contributor.Name);
-                        }
-                        contributorDetails[contributor.Name] = details;
-                    }
-                }
-            }
-
-            StateHasChanged();
-            await Task.Delay(300); // Allow DOM to render expanded rows
-
-            string fileName = $"ProductivityInsights_{selectedOption}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
-            var module = await GetJsModule();
-            await module.InvokeVoidAsync("downloadResultsAsPdf", "analysisResultsContainer", fileName);
-
-            // Restore original expanded state
-            expandedRows = originalExpandedRows;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"PDF generation error: {ex.Message}");
-        }
-        finally
-        {
-            isGeneratingPdf = false;
-            StateHasChanged();
-        }
-    }
-
     private IncidentManagementRequest CaptureIncidentManagementRequest()
     {
         bool isTeamsView = selectedView == "teams";
@@ -3920,7 +3879,6 @@
     private HashSet<string> expandedRows = new HashSet<string>();
     private List<(string Name, string Summary)> contributors = new List<(string Name, string Summary)>();
     private bool isLoadingResults = false;
-    private bool isGeneratingPdf = false;
     private Dictionary<string, string> contributorDetails = new Dictionary<string, string>();
     private List<CommitTrendDataPoint>? trendData = null;
     private string trendProgressPhase = "";
