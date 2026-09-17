@@ -9,6 +9,8 @@ public static class ReportRenderingLimits
 {
     public const int MaximumOutputBytes = 32 * 1024 * 1024;
     public const int MaximumOutputCharacters = MaximumOutputBytes;
+    public const int MaximumExportFileBytes = 256 * 1024 * 1024;
+    public const int MaximumDetailedMarkupBytes = 64 * 1024 * 1024;
     public const int MaximumInputCharacters = 32 * 1024 * 1024;
     public const int MaximumRecordCharacters = 1024 * 1024;
     public const int MaximumRecords = 200_000;
@@ -44,24 +46,32 @@ internal sealed class ReportInputBudget(CancellationToken token)
         Record(identity.Name, identity.Email, identity.Id, identity.PrincipalName);
 }
 
-internal sealed class ReportOutput(CancellationToken token, bool countOnly = false)
+internal sealed class ReportOutput(CancellationToken token, bool countOnly = false,
+    TextWriter? destination = null, int maximumBytes = ReportRenderingLimits.MaximumOutputBytes)
 {
-    private readonly StringBuilder? text = countOnly ? null : new();
+    private readonly StringBuilder? text = countOnly || destination is not null ? null : new();
+    private readonly int limit = maximumBytes > 0 ? maximumBytes : throw new ArgumentOutOfRangeException(nameof(maximumBytes));
     private int characters;
     private long utf8Bytes;
     private bool previousHighSurrogate;
 
-    public void Append(string value)
+    internal int Length => characters;
+    internal long ByteCount => utf8Bytes;
+
+    public void Append(string value) => Append(value.AsSpan());
+
+    public void Append(ReadOnlySpan<char> value)
     {
         token.ThrowIfCancellationRequested();
-        if ((long)characters + value.Length > ReportRenderingLimits.MaximumOutputCharacters)
+        if ((long)characters + value.Length > limit)
             throw OutputLimit();
         for (var offset = 0; offset < value.Length; offset += 4096)
         {
             token.ThrowIfCancellationRequested();
-            var chunk = value.AsSpan(offset, Math.Min(4096, value.Length - offset));
+            var chunk = value.Slice(offset, Math.Min(4096, value.Length - offset));
             foreach (var character in chunk) Count(character);
             text?.Append(chunk);
+            if (!countOnly) destination?.Write(chunk);
         }
     }
 
@@ -69,36 +79,41 @@ internal sealed class ReportOutput(CancellationToken token, bool countOnly = fal
     {
         Count(value);
         text?.Append(value);
+        if (!countOnly) destination?.Write(value);
     }
 
     private void Count(char value)
     {
         if ((characters & 1023) == 0)
             token.ThrowIfCancellationRequested();
-        if (characters == ReportRenderingLimits.MaximumOutputCharacters)
+        if (characters == limit)
             throw OutputLimit();
         // An unpaired surrogate uses UTF-8's replacement character; a completed pair takes four bytes.
         var bytes = previousHighSurrogate && char.IsLowSurrogate(value) ? 1
             : value <= 0x7f ? 1 : value <= 0x7ff ? 2 : 3;
-        if (utf8Bytes + bytes > ReportRenderingLimits.MaximumOutputBytes)
+        if (utf8Bytes + bytes > limit)
             throw OutputLimit();
         utf8Bytes += bytes;
         characters++;
         previousHighSurrogate = char.IsHighSurrogate(value);
     }
 
-    private static ReportSizeLimitException OutputLimit() =>
-        new("The complete report exceeds the 32 MiB UTF-8 per-file rendering limit (64 MiB maximum for the pair). Select a smaller scope or date range; no report was truncated.");
+    private ReportSizeLimitException OutputLimit() =>
+        new($"The report exceeds the {ReportFormatting.Number(limit / (1024 * 1024))} MiB UTF-8 "
+            + (destination is null ? "in-memory rendering limit" : "per-file export rendering limit")
+            + ". Select a smaller scope or date range; no report was truncated.");
 
     private void Repeat(char value, int count)
     {
-        if ((long)characters + count > ReportRenderingLimits.MaximumOutputCharacters)
+        if ((long)characters + count > limit)
             throw OutputLimit();
         for (var offset = 0; offset < count; offset += 4096)
         {
             var length = Math.Min(4096, count - offset);
             for (var index = 0; index < length; index++) Count(value);
             text?.Append(value, length);
+            if (!countOnly && destination is not null)
+                for (var index = 0; index < length; index++) destination.Write(value);
         }
     }
 
@@ -209,7 +224,7 @@ internal sealed class ReportOutput(CancellationToken token, bool countOnly = fal
     {
         token.ThrowIfCancellationRequested();
         if (text is null)
-            throw new InvalidOperationException("A size-only report pass cannot be returned as text.");
+            throw new InvalidOperationException("A non-buffered report pass cannot be returned as text.");
         var result = text.ToString();
         token.ThrowIfCancellationRequested();
         return result;
@@ -271,11 +286,12 @@ internal static class ReportFormatting
     {
         ArgumentNullException.ThrowIfNull(fileName);
         if (fileName.Length > 255)
-            throw new ArgumentException("The matching Markdown filename exceeds the 255-character filename limit.", nameof(fileName));
-        if (string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+            throw new ArgumentException("The matching detail filename exceeds the 255-character filename limit.", nameof(fileName));
+        if (string.IsNullOrWhiteSpace(fileName)
+            || !(fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
             || fileName.IndexOfAny(['/', '\\', ':', '\0']) >= 0 || fileName.Any(char.IsControl)
             || fileName is "." or "..")
-            throw new ArgumentException("The Markdown link must name a sibling .md file, not a path or URL.", nameof(fileName));
+            throw new ArgumentException("The detail link must name a sibling .md or .html file, not a path or URL.", nameof(fileName));
         return "./" + Uri.EscapeDataString(fileName);
     }
 

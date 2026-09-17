@@ -48,7 +48,8 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 - Preserve all existing UX report markup, icons, styles, labels, ordering, source mappings, and compact Git file previews. Export builders must never feed the on-screen report renderers.
 - New export-only collectors, immutable records, builders, and writers live under `Services/Reports/` and `Models/Reports/`. Share calculations only between the downloaded formats.
 - Capture executed input/source/manager context separately at run and cache boundaries. Editing form inputs must not relabel or redirect an export.
-- Deliver exactly one Markdown and one standalone HTML file inside a ZIP from the same snapshot of included sources. Markdown includes all collected files and detailed records; never scrape HTML/DOM, expand rows, or take screenshots.
+- Deliver exactly two standalone HTML files inside the unchanged ZIP name: `<stem>.html` (existing summary) and `<stem>_Detailed.html` (all former Markdown content). Render the unchanged Markdown layout with the bounded HTML writer; never scrape HTML/DOM, expand rows, or take screenshots. Preserve summary HTML byte-for-byte except its detail-link target, and leave online presentation unchanged.
+- Detailed HTML uses dark screen/light print styling and offline roster/ICM-path navigation. Record destinations alongside their source-qualified writer sections; never infer identity from display names. Keep empty/unavailable selections explicit rather than creating broken links or claiming zero activity.
 - Source-qualified work item, repository/commit, PR, and silo/incident keys prevent collisions and double counting across overlapping selections.
 - PR completion attribution uses `closedBy`/`closedDate`. Incident contribution uses recorded in-period actions with purge and scope checks. Teams Incident export uses available warehouse data, not independently attested historical coverage.
 - Start export history joins from the small team-scoped incident key set with broadcast, not warehouse-wide period history. Qualify action IDs by silo/incident/history ID; do not assume HistoryId is globally unique or bypass true partial-query failures.
@@ -57,6 +58,7 @@ This is a .NET 8.0 Blazor Server application for analyzing team productivity met
 - Git source HTTP/transport failures are best-effort: continue with other sources and disclose omissions in both files. Publish each source atomically; skipped sources must not create zero-activity rows or enter totals. Do not cache snapshots with skipped sources, so retrying export retries availability.
 - Cancellation, resource limits, required data-query failures, malformed/partial responses, and Incident Details coverage failures remain export-only errors. Disclose Teams Incident data availability and zero semantics; never change legacy analysis handling or treat UI caches as complete export evidence.
 - Use safe encoded text/links and `DotNetStreamReference`; retain stream lifetime, circuit-safe cleanup, cancellation, and stale-download guards. Never silently truncate oversized reports.
+- Stream downloaded HTML directly into a private delete-on-close temporary ZIP (256 MiB per HTML file, 512 MiB uncompressed pair). Keep repeated recorded text out of the structural Markdown buffer; do not switch downloads back to the smaller buffered string writers or persist server reports.
 - Compatibility tests preserve the restored `1379858` API/UX baseline; an API or report-format change requires explicit approval.
 
 ## Conventions

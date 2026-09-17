@@ -339,7 +339,7 @@ public static class ReportWriterFixtures
         NotContains(html, "<img", "HTML must encode text context.");
         Contains(html, "&lt;img src=x onerror=&quot;boom&quot;&gt;", "HTML context encoding.");
         Contains(html, "./report%20%231%20%26%20%CE%BB.md", "Matching sibling filename is URI encoded.");
-        foreach (var invalid in new[] { "javascript:evil.md", "..\\escape.md", "/escape.md", "bad\n.md", "report.html" })
+        foreach (var invalid in new[] { "javascript:evil.md", "..\\escape.md", "/escape.md", "bad\n.md", "report.exe" })
             Throws<ArgumentException>(() => HtmlSummaryReportWriter.Write(snapshot, invalid), "Invalid sibling filename must fail.");
         foreach (var unsafeUrl in new[] { "data:text/html,evil", "file:///c:/temp", "https://user:password@example.test/", "https://example.test/\nscript" })
             NotContains(MarkdownReportWriter.Write(snapshot with { WorkItems = [item with { Url = unsafeUrl }] }),
@@ -412,8 +412,8 @@ public static class ReportWriterFixtures
         var html = HtmlSummaryReportWriter.Write(snapshot, "large.md");
         True(html.Length < markdown.Length / 10, "HTML remains a summary, not a second detail dump.");
         Equal(commitCount, document.OverallRows.Sum(row => row.Commits), "Large report exact counts.");
-        True((long)Encoding.UTF8.GetByteCount(markdown) + Encoding.UTF8.GetByteCount(html) <= 64L * 1024 * 1024,
-            "The two real writer outputs fit the parent's 64 MiB combined UTF-8 budget.");
+        True((long)Encoding.UTF8.GetByteCount(markdown) + Encoding.UTF8.GetByteCount(html) <= ReportArchiveBuilder.MaximumReportBytes,
+            "The two real writer outputs fit the combined streamed-export UTF-8 budget.");
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         Throws<OperationCanceledException>(() => ReportDocumentBuilder.Build(snapshot, cancelled.Token), "Cancelled build.");
@@ -475,7 +475,7 @@ public static class ReportWriterFixtures
         before = GC.GetAllocatedBytesForCurrentThread();
         var exception = Throws<ReportSizeLimitException>(() => MarkdownReportWriter.Write(unicode),
             "UTF-8 byte expansion must fail even when character count is below the old limit.");
-        Contains(exception.Message, "32 MiB UTF-8", "Per-file quota coordinates with the parent's two-file 64 MiB budget.");
+        Contains(exception.Message, "32 MiB UTF-8", "Buffered string helpers retain their smaller quota; streamed exports have a separate larger budget.");
         True(GC.GetAllocatedBytesForCurrentThread() - before < 8L * 1024 * 1024,
             "Oversized Markdown is counted without allocating a giant output buffer or string.");
 
@@ -628,7 +628,7 @@ public static class ReportWriterFixtures
         History = [new("Active", Start, actor), new("Done", Start.AddDays(activeDays), actor)]
     };
 
-    private static ReportSnapshot WorkSnapshot()
+    internal static ReportSnapshot WorkSnapshot()
     {
         var first = WorkItem(1, "org-a", "source-a", Alice, 5) with
         {
@@ -654,7 +654,7 @@ public static class ReportWriterFixtures
         };
     }
 
-    private static ReportSnapshot GitSnapshot()
+    internal static ReportSnapshot GitSnapshot()
     {
         var files = Enumerable.Range(1, 13).Select(index => new GitFileReportRecord(
             index == 13 ? "tests\\file13-λ.cs" : $"src\\file{index}.cs", "edit", index, 1)).ToImmutableArray();
@@ -690,7 +690,7 @@ public static class ReportWriterFixtures
         };
     }
 
-    private static ReportSnapshot IncidentSnapshot()
+    internal static ReportSnapshot IncidentSnapshot()
     {
         var first = new IncidentReportRecord
         {

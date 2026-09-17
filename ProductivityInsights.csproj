@@ -13,8 +13,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Services\Reports\Assets\Montserrat-Variable.woff2" LogicalName="ProductivityInsights.Reports.Montserrat.woff2" />
+    <EmbeddedResource Include="Services\Reports\Assets\Montserrat-OFL.txt" LogicalName="ProductivityInsights.Reports.Montserrat.OFL" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Azure.Core" Version="1.57.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Markdig" Version="1.3.2" />
     <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="14.2.1" />
     <PackageReference Include="Polly" Version="8.6.5" />
     <PackageReference Include="Polly.Contrib.WaitAndRetry" Version="1.1.1" />

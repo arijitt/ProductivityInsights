@@ -28,12 +28,21 @@ public static class HtmlSummaryReportWriter
         return Render(document, markdownFileName, cancellationToken, countOnly: false).ToString();
     }
 
-    private static ReportOutput Render(ReportDocument document, string markdownFileName, CancellationToken cancellationToken, bool countOnly)
+    public static long WriteTo(ReportDocument document, string markdownFileName, TextWriter destination,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        return Render(document, markdownFileName, cancellationToken, countOnly: false,
+            destination, ReportRenderingLimits.MaximumExportFileBytes).ByteCount;
+    }
+
+    private static ReportOutput Render(ReportDocument document, string markdownFileName, CancellationToken cancellationToken, bool countOnly,
+        TextWriter? destination = null, int maximumBytes = ReportRenderingLimits.MaximumOutputBytes)
     {
         ArgumentNullException.ThrowIfNull(document);
         cancellationToken.ThrowIfCancellationRequested();
         var markdownUrl = ReportFormatting.MarkdownFileUrl(markdownFileName);
-        var output = new ReportOutput(cancellationToken, countOnly);
+        var output = new ReportOutput(cancellationToken, countOnly, destination, maximumBytes);
         var snapshot = document.Snapshot;
         var request = snapshot.Request;
         var presentation = request.Analysis == "gitCommits" ? new GitReportPresentation(document, cancellationToken) : null;

@@ -49,19 +49,23 @@ public static class ExportIntegrationTests
         using (var zip = new ZipArchive(archive.Content, ZipArchiveMode.Read))
         {
             CompatibilityTests.Require(zip.Entries.Count == 2, "Export must contain exactly two files.");
-            var markdownEntry = zip.Entries.Single(entry => entry.Name.EndsWith(".md"));
-            var htmlEntry = zip.Entries.Single(entry => entry.Name.EndsWith(".html"));
-            CompatibilityTests.Require(Path.GetFileNameWithoutExtension(markdownEntry.Name)
-                == Path.GetFileNameWithoutExtension(htmlEntry.Name), "Export stems differ.");
-            using var mdReader = new StreamReader(markdownEntry.Open());
+            CompatibilityTests.Require(zip.Entries.All(entry => entry.Name.EndsWith(".html")), "Both reports must be HTML.");
+            var detailedEntry = zip.Entries.Single(entry => entry.Name.EndsWith("_Detailed.html"));
+            var htmlEntry = zip.Entries.Single(entry => !entry.Name.EndsWith("_Detailed.html"));
+            var stem = Path.GetFileNameWithoutExtension(htmlEntry.Name);
+            CompatibilityTests.Require(detailedEntry.Name == stem + "_Detailed.html", "Detailed HTML naming changed the report stem.");
+            using var detailedReader = new StreamReader(detailedEntry.Open());
             using var htmlReader = new StreamReader(htmlEntry.Open());
-            var markdown = mdReader.ReadToEnd();
+            var detailed = detailedReader.ReadToEnd();
             var html = htmlReader.ReadToEnd();
-            CompatibilityTests.Require(markdown.Replace("\\_", "_").Contains("file_11.cs"), "Markdown truncated Git's file preview.");
-            CompatibilityTests.Require(markdown.Contains(captured.RunId.ToString())
-                || markdown.Contains(captured.RunId.ToString("N")), "Markdown omitted run identity.");
-            CompatibilityTests.Require(html.Contains(markdownEntry.Name), "HTML does not link to matching Markdown.");
-            CompatibilityTests.Require(!html.Contains("<script", StringComparison.OrdinalIgnoreCase),
+            CompatibilityTests.Require(detailed.Contains("file_11.cs"), "Detailed HTML truncated Git's file preview.");
+            CompatibilityTests.Require(detailed.Contains(captured.RunId.ToString())
+                || detailed.Contains(captured.RunId.ToString("N")), "Detailed HTML omitted run identity.");
+            var expectedSummary = HtmlSummaryReportWriter.Write(snapshot, stem + ".md")
+                .Replace("./" + Uri.EscapeDataString(stem + ".md"), "./" + Uri.EscapeDataString(detailedEntry.Name), StringComparison.Ordinal);
+            CompatibilityTests.Require(html == expectedSummary, "Summary HTML changed beyond the required detail-link target.");
+            CompatibilityTests.Require(!html.Contains("<script", StringComparison.OrdinalIgnoreCase)
+                && !detailed.Contains("<script", StringComparison.OrdinalIgnoreCase),
                 "Standalone HTML must not contain scripts.");
         }
 

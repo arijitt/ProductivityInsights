@@ -485,7 +485,7 @@ public static class ReportDocumentBuilder
     private static double? NonnegativeHours(DateTimeOffset? end, DateTimeOffset? start) =>
         end is { } to && start is { } from && to >= from ? (to - from).TotalHours : null;
     private static string PairKey(string left, string right) => $"{left.Length}:{left}{right.Length}:{right}";
-    private static string TeamKey(IncidentReportRecord item) =>
+    internal static string TeamKey(IncidentReportRecord item) =>
         $"{ReportFormatting.Label(item.OwningTenant)}\\{ReportFormatting.Label(item.OwningTeam)} (silo {item.SiloId})";
     private static long Activity(ReportSummaryRow row) =>
         (long)row.WorkItems + row.Commits + row.PullRequests + row.Active + row.Created + row.Mitigated + row.Resolved + row.Contributed;

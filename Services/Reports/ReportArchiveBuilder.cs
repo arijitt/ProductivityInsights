@@ -4,11 +4,11 @@ using ProductivityInsights.Models.Reports;
 
 namespace ProductivityInsights.Services.Reports;
 
-public sealed record ReportArchive(string FileName, MemoryStream Content);
+public sealed record ReportArchive(string FileName, Stream Content);
 
 public static class ReportArchiveBuilder
 {
-    public const long MaximumReportBytes = 64L * 1024 * 1024;
+    public const long MaximumReportBytes = 2L * ReportRenderingLimits.MaximumExportFileBytes;
 
     public static string GetFileName(ReportRequest request) => GetStem(request) + ".zip";
 
@@ -33,18 +33,16 @@ public static class ReportArchiveBuilder
         cancellationToken.ThrowIfCancellationRequested();
         var stem = GetStem(snapshot.Request);
         var document = ReportDocumentBuilder.Build(snapshot, cancellationToken);
-        var markdown = MarkdownReportWriter.Write(document, cancellationToken);
-        var html = HtmlSummaryReportWriter.Write(document, stem + ".md", cancellationToken);
-        if ((long)Encoding.UTF8.GetByteCount(markdown) + Encoding.UTF8.GetByteCount(html) > MaximumReportBytes)
-            throw new InvalidOperationException("The complete report exceeds the 64 MiB export resource limit. Select a smaller scope or date range.");
-
-        var stream = new MemoryStream();
+        var detailedName = stem + "_Detailed.html";
+        var stream = CreateTemporaryArchive();
         try
         {
             using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
             {
-                AddEntry(zip, stem + ".md", markdown, cancellationToken);
-                AddEntry(zip, stem + ".html", html, cancellationToken);
+                var bytes = AddEntry(zip, detailedName, writer => HtmlDetailedReportWriter.WriteTo(document, writer, cancellationToken));
+                bytes += AddEntry(zip, stem + ".html", writer => HtmlSummaryReportWriter.WriteTo(document, detailedName, writer, cancellationToken));
+                if (bytes > MaximumReportBytes)
+                    throw new ReportSizeLimitException($"The complete report exceeds the {ReportFormatting.Number(MaximumReportBytes / (1024 * 1024))} MiB combined export limit. No report was truncated.");
             }
             cancellationToken.ThrowIfCancellationRequested();
             stream.Position = 0;
@@ -57,15 +55,22 @@ public static class ReportArchiveBuilder
         }
     }
 
-    private static void AddEntry(ZipArchive zip, string name, string content, CancellationToken token)
+    private static FileStream CreateTemporaryArchive()
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite, Share = FileShare.None, BufferSize = 64 * 1024,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose
+        };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        return new FileStream(Path.Combine(Path.GetTempPath(), $"ProductivityInsights-{Guid.NewGuid():N}.zip"), options);
+    }
+
+    private static long AddEntry(ZipArchive zip, string name, Func<TextWriter, long> write)
     {
         var entry = zip.CreateEntry(name, CompressionLevel.Fastest);
         using var stream = entry.Open();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-        for (var offset = 0; offset < content.Length; offset += 8192)
-        {
-            token.ThrowIfCancellationRequested();
-            writer.Write(content.AsSpan(offset, Math.Min(8192, content.Length - offset)));
-        }
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024);
+        return write(writer);
     }
 }

@@ -7,6 +7,8 @@ namespace ProductivityInsights.Services.Reports;
 internal sealed class IncidentReportPresentation
 {
     public sealed record SourceGroup(ImmutableArray<string> SourceKeys, ImmutableArray<IncidentDocument> Incidents);
+    public sealed record ContributedIncident(IncidentDocument Incident, ImmutableArray<ReportEntity<IncidentActionReportRecord>> Actions);
+    public sealed record MemberActivityDetails(ImmutableArray<IncidentDocument> Created, ImmutableArray<ContributedIncident> Contributed);
 
     private readonly ReportDocument document;
     private readonly CancellationToken token;
@@ -68,6 +70,42 @@ internal sealed class IncidentReportPresentation
     public ImmutableArray<ReportSummaryRow> OverallRows { get; }
     public string Contributor(ReportSummaryRow row) => names.GetValueOrDefault(row.ContributorKey, row.Contributor);
     public string Path(ReportSummaryRow row) => row.SourceKey is null ? "\u2014" : sources[row.SourceKey].Label;
+    public string MemberKey(ReportIdentity identity) => catalog.Get(identity).Key;
+
+    public ImmutableDictionary<string, MemberActivityDetails> MemberActivityDetailsByKey()
+    {
+        token.ThrowIfCancellationRequested();
+        var incidents = document.Incidents.ToDictionary(item => item.Entity.Record.EntityKey, StringComparer.Ordinal);
+        var created = document.Incidents.Where(item => item.Entity.Record.Created)
+            .ToLookup(item => MemberKey(item.Entity.Record.Owner), StringComparer.Ordinal);
+        var contributions = new Dictionary<string, ImmutableArray<ContributedIncident>>(StringComparer.Ordinal);
+        foreach (var member in document.IncidentActions.GroupBy(action => MemberKey(action.Record.Actor), StringComparer.Ordinal))
+        {
+            token.ThrowIfCancellationRequested();
+            var items = ImmutableArray.CreateBuilder<ContributedIncident>();
+            foreach (var group in member.GroupBy(action =>
+            {
+                token.ThrowIfCancellationRequested();
+                return action.Record.IncidentKey;
+            }, StringComparer.Ordinal))
+            {
+                token.ThrowIfCancellationRequested();
+                items.Add(new(incidents[group.Key], group.ToImmutableArray()));
+            }
+            contributions.Add(member.Key, items.ToImmutable());
+        }
+        var result = ImmutableDictionary.CreateBuilder<string, MemberActivityDetails>(StringComparer.Ordinal);
+        foreach (var member in document.OverallRows)
+        {
+            token.ThrowIfCancellationRequested();
+            var memberCreated = created[member.ContributorKey].ToImmutableArray();
+            var memberContributed = contributions.GetValueOrDefault(member.ContributorKey, []);
+            if (memberCreated.Length != member.Created || memberContributed.Length != member.Contributed)
+                throw new InvalidOperationException("Incident member Created/Contributed details do not match the report's contributor totals.");
+            result.Add(member.ContributorKey, new(memberCreated, memberContributed));
+        }
+        return result.ToImmutable();
+    }
 
     private static long Activity(ReportSummaryRow row) =>
         (long)row.Active + row.Created + row.Mitigated + row.Resolved + row.Contributed;

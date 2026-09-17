@@ -74,9 +74,9 @@ internal static class LiveIncidentReportProbe
             throw new InvalidOperationException("The in-scope unkeyed action disappeared from the collected report.");
         using var content = ReportArchiveBuilder.Build(snapshot, timeout.Token).Content;
         using var zip = new ZipArchive(content, ZipArchiveMode.Read);
-        if (zip.Entries.Count != 2 || zip.Entries.Count(entry => entry.Name.EndsWith(".md", StringComparison.Ordinal)) != 1
-            || zip.Entries.Count(entry => entry.Name.EndsWith(".html", StringComparison.Ordinal)) != 1)
-            throw new InvalidOperationException("Live Incident export did not produce the Markdown/HTML pair.");
+        if (zip.Entries.Count != 2 || zip.Entries.Count(entry => entry.Name.EndsWith("_Detailed.html", StringComparison.Ordinal)) != 1
+            || zip.Entries.Count(entry => entry.Name.EndsWith(".html", StringComparison.Ordinal)) != 2)
+            throw new InvalidOperationException("Live Incident export did not produce the detailed/summary HTML pair.");
         if (probeUnkeyed)
         {
             foreach (var entry in zip.Entries)

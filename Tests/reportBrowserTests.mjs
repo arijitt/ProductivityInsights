@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, readdir, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const url = process.argv[2] ?? "http://127.0.0.1:5187/";
 const fixture = process.argv[3] ?? "gitCommits";
 const collectedIncidentFixture = fixture === "incident-available-export" || fixture === "incident-unkeyed-export";
 const incidentFixture = fixture === "incidentManagement" || collectedIncidentFixture;
+const artifacts = process.env.REPORT_TEST_ARTIFACTS;
+if (artifacts) await mkdir(artifacts, { recursive: true });
 const browserPath = [
     process.env.REPORT_TEST_BROWSER,
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -259,29 +262,200 @@ try {
         assert.equal(await evaluate("reportSaveFixture.names.every(name => name.endsWith('.zip') && name !== 'Chosen report.zip')"), true);
         const entries = unzip(await readFile(join(downloads, name)));
         assert.equal(entries.size, 2);
-        const [markdownName, markdown] = [...entries].find(([name]) => name.endsWith(".md"));
-        const [htmlName, html] = [...entries].find(([name]) => name.endsWith(".html"));
-        assert.equal(markdownName.slice(0, -3), htmlName.slice(0, -5));
-        assert(html.includes(markdownName));
-        assert(!/<script\b|<img\b/i.test(html), "Export contains external/script/image content");
-        assert(markdown.includes("Example Contributor"));
+        assert([...entries.keys()].every(name => name.endsWith(".html")), "Markdown was not replaced by detailed HTML");
+        const [detailedName, detailed] = [...entries].find(([name]) => name.endsWith("_Detailed.html"));
+        const [htmlName, html] = [...entries].find(([name]) => !name.endsWith("_Detailed.html"));
+        assert.equal(detailedName, htmlName.slice(0, -5) + "_Detailed.html");
+        assert(html.includes(detailedName));
+        for (const content of [html, detailed]) {
+            assert(!/<script\b|<img\b|<iframe\b/i.test(content), "Export contains external/script/image content");
+        }
+        const extracted = join(profile, "extracted");
+        await mkdir(extracted);
+        await Promise.all([...entries].map(([file, content]) => writeFile(join(extracted, file), content)));
+        const { targetId: detailTarget } = await cdp("Target.createTarget", {
+            url: pathToFileURL(join(extracted, htmlName)).href
+        });
+        let detailView;
+        try {
+            const { sessionId: detailSession } = await cdp("Target.attachToTarget", { targetId: detailTarget, flatten: true });
+            await cdp("Emulation.setDeviceMetricsOverride", {
+                width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false
+            }, detailSession);
+            await until(async () => {
+                const result = await cdp("Runtime.evaluate", {
+                    expression: `(() => { const link = document.querySelector('a[href$="_Detailed.html"]'); if (!link) return false; link.click(); return true; })()`,
+                    returnByValue: true
+                }, detailSession);
+                return result.result.value;
+            }, "summary link to detailed HTML", 10000);
+            detailView = await until(async () => {
+                const result = await cdp("Runtime.evaluate", {
+                    expression: `document.readyState === 'complete' && document.fonts.status === 'loaded' && document.querySelector('main h1') && ({
+                        text:document.querySelector('main').innerText,
+                        cells:[...document.querySelectorAll('td')].map(cell => cell.textContent),
+                        tables:document.querySelectorAll('table').length,
+                        headings:document.querySelectorAll('main h1,main h2,main h3').length,
+                        unsafe:document.querySelectorAll('script,img,iframe,object,embed').length,
+                        font:getComputedStyle(document.body).fontFamily,
+                        fontSize:getComputedStyle(document.body).fontSize,
+                        embeddedFontLoaded:[...document.fonts].some(font => font.family.includes('Montserrat') && font.status === 'loaded'),
+                        icons:document.querySelectorAll('.report-icon').length,
+                        sections:document.querySelectorAll('.report-section-heading').length,
+                        tableWrappers:document.querySelectorAll('.report-table-scroll').length,
+                        numericFont:getComputedStyle(document.querySelector('table')).fontVariantNumeric,
+                        palette:{
+                            scheme:getComputedStyle(document.documentElement).colorScheme,
+                            body:getComputedStyle(document.body).backgroundColor,
+                            main:getComputedStyle(document.querySelector('main')).backgroundColor,
+                            text:getComputedStyle(document.querySelector('main')).color
+                        },
+                        roster:document.querySelectorAll('.report-roster-member').length,
+                        rosterLinks:document.querySelectorAll('.report-roster-member a.report-member-link').length,
+                        rosterNames:[...document.querySelectorAll('.report-roster-member a.report-member-link')].map(link => link.textContent),
+                        memberIncidentDetails:${incidentFixture} ? [...document.querySelectorAll('.report-roster-member a.report-member-link')].map(link => {
+                            const heading = document.getElementById(link.hash.slice(1));
+                            const buckets = [];
+                            let bucket;
+                            for (let node = heading.nextElementSibling; node && !/^H[23]$/.test(node.tagName); node = node.nextElementSibling) {
+                                const match = node.tagName === 'H4' && /^(Created|Contributed) ICMs \\(([0-9]+)\\)$/.exec(node.textContent);
+                                if (match) {
+                                    bucket = {kind:match[1],count:Number(match[2]),incidents:[],actions:0};
+                                    buckets.push(bucket);
+                                } else if (bucket && node.tagName === 'H5' && node.textContent.startsWith('Incident ')) {
+                                    bucket.incidents.push(node.textContent);
+                                } else if (bucket && [...node.querySelectorAll('th')].some(cell => cell.textContent === 'Action ID')) {
+                                    bucket.actions += node.querySelectorAll('tbody tr').length;
+                                }
+                            }
+                            return {member:link.textContent,buckets};
+                        }) : [],
+                        icmLinks:document.querySelectorAll('a.report-icm-link').length,
+                        recordedUrls:[...document.querySelectorAll('li')].filter(item =>
+                            item.querySelector(':scope > strong')?.textContent === 'Recorded URL:').map(item => ({
+                                text:item.querySelector(':scope > a')?.textContent,
+                                href:item.querySelector(':scope > a')?.getAttribute('href')
+                            })),
+                        viewIncidentLinks:[...document.querySelectorAll('a')].filter(link => link.textContent === 'View Incident').length,
+                        brokenLinks:[...document.querySelectorAll('a[href^="#"]')].filter(link => {
+                            const target = document.getElementById(link.hash.slice(1));
+                            return !target || !target.matches('h3,h4,tr') || !target.textContent.trim();
+                        }).length,
+                        duplicateIds:[...document.querySelectorAll('[id]')].length - new Set([...document.querySelectorAll('[id]')].map(node => node.id)).size,
+                        pageOverflow:document.documentElement.scrollWidth > innerWidth + 1,
+                        remoteResources:performance.getEntriesByType('resource').filter(resource => /^https?:/.test(resource.name)).length
+                    })`,
+                    returnByValue: true
+                }, detailSession);
+                assert(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+                return result.result.value;
+            }, "readable detailed HTML", 30000);
+            assert(detailView.tables > 0 && detailView.headings > 1, "Details were not rendered into readable HTML structure");
+            assert.equal(detailView.unsafe, 0);
+            assert(detailView.font.includes("Montserrat") && detailView.embeddedFontLoaded, "The offline report font did not load");
+            assert.equal(detailView.fontSize, "14px");
+            assert(detailView.icons > 0 && detailView.sections > 0, "Report icons or section hierarchy are missing");
+            assert.equal(detailView.tableWrappers, detailView.tables);
+            assert.equal(detailView.numericFont, "tabular-nums");
+            assert.equal(detailView.pageOverflow, false, "Desktop report content overflows the page");
+            assert.equal(detailView.remoteResources, 0, "Detailed presentation must remain self-contained");
+            assert.deepEqual(detailView.palette, {
+                scheme: "dark", body: "rgb(11, 18, 32)", main: "rgb(17, 28, 46)", text: "rgb(230, 237, 247)"
+            }, "Only detailed screen presentation should use the dark palette");
+            assert(detailView.roster > 0);
+            assert.equal(detailView.rosterLinks, detailView.roster, "Every roster member needs an actionable detail link");
+            assert.equal(detailView.brokenLinks, 0, "Offline report links must resolve to real detail headings or evidence rows");
+            assert.equal(detailView.duplicateIds, 0, "Each anchor ID must appear only once");
+            if (incidentFixture) {
+                assert(detailView.icmLinks > 0, "ICM paths must link to their report details");
+                assert.equal(detailView.memberIncidentDetails.length, detailView.roster);
+                for (const member of detailView.memberIncidentDetails) {
+                    const expectedCount = member.member.includes("Example Contributor") ? 1 : 0;
+                    assert.deepEqual(member.buckets.map(bucket => [bucket.kind, bucket.count]),
+                        [["Created", expectedCount], ["Contributed", expectedCount]],
+                        "Every member's Created and Contributed sections must match existing incident credits");
+                    for (const bucket of member.buckets) {
+                        assert.equal(bucket.incidents.length, expectedCount, "Every credited incident needs full member-scoped details");
+                        assert.equal(new Set(bucket.incidents).size, expectedCount, "Member buckets must deduplicate incidents");
+                        if (bucket.kind === "Contributed") assert.equal(bucket.actions > 0, expectedCount > 0,
+                            "Contributed incidents need the member's recorded action evidence");
+                    }
+                }
+                assert.equal(detailView.viewIncidentLinks, 0, "Redundant View Incident links must be removed");
+                assert(detailView.recordedUrls.length > 0 && detailView.recordedUrls.every(link =>
+                    /^https?:/.test(link.href ?? "") && link.text === link.href),
+                    "Recorded incident URLs must be clickable at the field itself");
+                assert.deepEqual(detailView.rosterNames,
+                    [...detailView.rosterNames].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" })),
+                    "Incident Team Roster must appear in ascending first-name order");
+            }
+            if (artifacts) {
+                const shot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
+                await writeFile(join(artifacts, `${fixture}-detailed-desktop.png`), Buffer.from(shot.data, "base64"));
+                await cdp("Runtime.evaluate", { expression: "document.querySelector('table').scrollIntoView({block:'start'})" }, detailSession);
+                const tableShot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
+                await writeFile(join(artifacts, `${fixture}-detailed-table.png`), Buffer.from(tableShot.data, "base64"));
+            }
+            for (const selector of [
+                ".report-roster-member a.report-member-link",
+                ...(incidentFixture ? ["a.report-icm-link"] : [])
+            ]) {
+                const navigation = await cdp("Runtime.evaluate", {
+                    expression: `(() => {
+                        const link = document.querySelector(${JSON.stringify(selector)});
+                        link.click();
+                        const target = document.getElementById(link.hash.slice(1));
+                        const rect = target.getBoundingClientRect();
+                        return {hash:location.hash === link.hash, visible:rect.top < innerHeight && rect.bottom > 0,
+                            focused:document.activeElement === target, highlighted:getComputedStyle(target).outlineStyle};
+                    })()`,
+                    returnByValue: true
+                }, detailSession);
+                assert.deepEqual(navigation.result.value, { hash: true, visible: true, focused: true, highlighted: "solid" },
+                    "Roster and ICM links must navigate, focus and highlight their detail destination offline");
+            }
+            await cdp("Emulation.setDeviceMetricsOverride", {
+                width: 390, height: 844, deviceScaleFactor: 1, mobile: true
+            }, detailSession);
+            const mobile = await cdp("Runtime.evaluate", {
+                expression: "document.documentElement.scrollWidth <= innerWidth + 1", returnByValue: true
+            }, detailSession);
+            assert.equal(mobile.result.value, true, "Narrow-screen report overflows instead of wrapping or scrolling its tables");
+            if (artifacts) {
+                await cdp("Runtime.evaluate", { expression: "scrollTo(0,0)" }, detailSession);
+                const shot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
+                await writeFile(join(artifacts, `${fixture}-detailed-mobile.png`), Buffer.from(shot.data, "base64"));
+            }
+            await cdp("Emulation.setEmulatedMedia", { media: "print" }, detailSession);
+            const print = await cdp("Runtime.evaluate", {
+                expression: "({background:getComputedStyle(document.body).backgroundColor,shadow:getComputedStyle(document.querySelector('main')).boxShadow,overflow:getComputedStyle(document.querySelector('.report-table-scroll')).overflowX,scheme:getComputedStyle(document.documentElement).colorScheme,heading:getComputedStyle(document.querySelector('h3')).color})",
+                returnByValue: true
+            }, detailSession);
+            assert.deepEqual(print.result.value, { background: "rgb(255, 255, 255)", shadow: "none", overflow: "visible",
+                scheme: "light", heading: "rgb(13, 27, 63)" },
+                "Print presentation must remove page decoration without clipping tables");
+        } finally {
+            await cdp("Target.closeTarget", { targetId: detailTarget });
+        }
+        const detailText = detailView.text;
+        assert(detailText.includes("Example Contributor"));
         if (fixture === "gitCommits" || fixture === "large" || fixture === "workItems" || incidentFixture) {
             const workItems = fixture === "workItems";
             const incidents = incidentFixture;
             const incidentCounts = collectedIncidentFixture ? ["0", "1", "0", "1", "1"] : ["0", "1", "1", "1", "1"];
             if (workItems) {
-                assert(markdown.includes("\u{1F3C6} TEAM WORK ITEM COMPLETION DETAILS BY PERSON"));
-                assert(markdown.includes("New \u2192 Active by Example Contributor on 2026-07-09"));
-                assert(markdown.includes("State change history") && markdown.includes("Total time by state"));
-                assert(markdown.indexOf("TEAM WORK ITEM SUMMARY BY AREA PATH") < markdown.indexOf("Captured inputs and export query context"));
+                assert(detailText.includes("\u{1F3C6} TEAM WORK ITEM COMPLETION DETAILS BY PERSON"));
+                assert(detailText.includes("New \u2192 Active by Example Contributor on 2026-07-09"));
+                assert(detailText.includes("State change history") && detailText.includes("Total time by state"));
+                assert(detailText.indexOf("TEAM WORK ITEM SUMMARY BY AREA PATH") < detailText.indexOf("Captured inputs and export query context"));
             } else if (incidents) {
-                assert(markdown.includes("TEAM INCIDENT DETAILS BY ICM PATH") && markdown.includes("Incident Details:"));
-                assert(markdown.includes("Contributors with recorded in-period actions"));
-                assert(markdown.includes("TTD by severity"));
+                assert(detailText.includes("TEAM INCIDENT DETAILS BY ICM PATH") && detailText.includes("Incident Details:"));
+                assert(detailText.includes("Contributors with recorded in-period actions"));
+                assert(detailText.includes("TTD by severity"));
                 if (collectedIncidentFixture) {
-                    assert(markdown.includes("Synthetic mitigation"));
-                    assert(markdown.includes(fixture === "incident-unkeyed-export" ? "| Not provided |" : "| 100 |"));
-                    for (const text of [markdown, html]) {
+                    assert(detailText.includes("Synthetic mitigation"));
+                    assert(detailView.cells.includes(fixture === "incident-unkeyed-export" ? "Not provided" : "100"));
+                    for (const text of [detailText, html]) {
                         assert(text.includes("Available warehouse data"), "Available-data coverage disclosure missing");
                         assert(!text.includes("Verified history window"), "Export invented coverage verification");
                         if (fixture === "incident-unkeyed-export") {
@@ -289,14 +463,14 @@ try {
                         }
                     }
                 } else {
-                    assert(markdown.includes("Example mitigation") && markdown.includes("action-1"));
+                    assert(detailText.includes("Example mitigation") && detailText.includes("action-1"));
                 }
-                assert(markdown.indexOf("TEAM INCIDENT SUMMARY BY ICM PATH") < markdown.indexOf("Captured inputs and export query context"));
+                assert(detailText.indexOf("TEAM INCIDENT SUMMARY BY ICM PATH") < detailText.indexOf("Captured inputs and export query context"));
             } else {
-                assert(markdown.replaceAll("\\_", "_").includes("file_11.cs"), "Full changed-file collection missing");
-                assert(markdown.includes(fixture === "large" ? "Example change 4999" : "Example change 1"));
-                assert(markdown.includes("\u{1F4CB} TEAM CODE COMMIT DETAILS BY PERSON:"));
-                assert(markdown.includes("\u{1F504} Commit:"));
+                assert(detailText.includes("file_11.cs"), "Full changed-file collection missing");
+                assert(detailText.includes(fixture === "large" ? "Example change 4999" : "Example change 1"));
+                assert(detailText.includes("\u{1F4CB} TEAM CODE COMMIT DETAILS BY PERSON:"));
+                assert(detailText.includes("\u{1F504} Commit:"));
             }
             const { targetId: reportTarget } = await cdp("Target.createTarget", {
                 url: `data:text/html;base64,${Buffer.from(html).toString("base64")}`
@@ -346,7 +520,7 @@ try {
                     if (incidents && index === 0) assert.equal(zero[1], "\u2014");
                 }
                 if (incidents) assert.deepEqual(report.tables[1].at(-1), ["\u{1F3C1} TOTAL", ...incidentCounts]);
-                assert(!markdown.includes("Files Added") && !markdown.includes("Files Modified") && !markdown.includes("Files Deleted"),
+                assert(!detailText.includes("Files Added") && !detailText.includes("Files Modified") && !detailText.includes("Files Deleted"),
                     "Git-only HTML file-count columns changed another format");
                 assert.equal(report.background, "rgb(30, 30, 30)");
                 assert.equal(report.layout, "auto");
@@ -358,7 +532,7 @@ try {
             }
         }
         if (fixture === "skipped-export") {
-            assert(markdown.includes("Skipped sources - excluded from totals"));
+            assert(detailText.includes("Skipped sources - excluded from totals"));
             assert(html.includes("Activity is unavailable, not zero"));
             let previousName = name;
             for (let attempt = 0; attempt < 2; attempt++) {
@@ -374,9 +548,9 @@ try {
                 }, attempt === 0 ? "retry unavailable source" : "reuse recovered complete snapshot");
                 previousName = nextName;
                 const recovered = unzip(await readFile(join(downloads, nextName)));
-                const recoveredMarkdown = [...recovered].find(([file]) => file.endsWith(".md"))[1];
-                assert(recoveredMarkdown.includes("Example change 1"), "Recovered source activity was not exported");
-                assert(!recoveredMarkdown.includes("Skipped sources - excluded from totals"), "Unavailable snapshot was cached");
+                const recoveredDetails = [...recovered].find(([file]) => file.endsWith("_Detailed.html"))[1];
+                assert(recoveredDetails.includes("Example change 1"), "Recovered source activity was not exported");
+                assert(!recoveredDetails.includes("Skipped sources - excluded from totals"), "Unavailable snapshot was cached");
             }
             if (fixture === "gitCommits") {
                 const previous = await readFile(join(downloads, name));

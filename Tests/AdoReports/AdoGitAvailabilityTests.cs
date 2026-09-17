@@ -139,7 +139,7 @@ public static class AdoGitAvailabilityTests
         using (archive.Content)
         using (var zip = new ZipArchive(archive.Content, ZipArchiveMode.Read))
         {
-            That(zip.Entries.Count == 2, "Best-effort export must still contain exactly matching Markdown and HTML.");
+            That(zip.Entries.Count == 2, "Best-effort export must still contain exactly matching detailed and summary HTML.");
             foreach (var entry in zip.Entries)
             {
                 using var reader = new StreamReader(entry.Open());
