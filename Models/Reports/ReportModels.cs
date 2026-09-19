@@ -35,6 +35,7 @@ public sealed record ReportRequest
     public string? EffectiveBoundsOrigin { get; init; }
     public required ImmutableArray<ReportSource> Sources { get; init; }
     public ImmutableArray<ReportIdentity> Roster { get; init; } = [];
+    public ImmutableArray<int?> RosterParentIndices { get; init; } = [];
     public string? Manager { get; init; }
     public string TrendPeriod { get; init; } = "daily";
     public bool IsTeams => View == "teams";

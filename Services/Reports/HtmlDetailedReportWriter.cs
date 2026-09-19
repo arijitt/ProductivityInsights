@@ -18,15 +18,15 @@ public static class HtmlDetailedReportWriter
     public static string Write(ReportDocument document, CancellationToken cancellationToken = default)
     {
         var (body, markdown, codeBlocks) = Prepare(document, cancellationToken);
-        Render(document.Title, body, markdown, codeBlocks, cancellationToken, countOnly: true);
-        return Render(document.Title, body, markdown, codeBlocks, cancellationToken, countOnly: false).ToString();
+        Render(document, body, markdown, codeBlocks, cancellationToken, countOnly: true);
+        return Render(document, body, markdown, codeBlocks, cancellationToken, countOnly: false).ToString();
     }
 
     public static long WriteTo(ReportDocument document, TextWriter destination, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(destination);
         var (body, markdown, codeBlocks) = Prepare(document, cancellationToken);
-        return Render(document.Title, body, markdown, codeBlocks, cancellationToken, countOnly: false,
+        return Render(document, body, markdown, codeBlocks, cancellationToken, countOnly: false,
             destination, ReportRenderingLimits.MaximumExportFileBytes).ByteCount;
     }
 
@@ -45,14 +45,14 @@ public static class HtmlDetailedReportWriter
         return (body, markdown, codeBlocks);
     }
 
-    private static ReportOutput Render(string title, MarkdownDocument body, string markdown, DetailedReportCodeBlocks codeBlocks,
+    private static ReportOutput Render(ReportDocument document, MarkdownDocument body, string markdown, DetailedReportCodeBlocks codeBlocks,
         CancellationToken token, bool countOnly, TextWriter? destination = null, int maximumBytes = ReportRenderingLimits.MaximumOutputBytes)
     {
         var output = new ReportOutput(token, countOnly, destination, maximumBytes);
         output.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\" />\n");
         output.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
         output.Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'\" />\n<title>");
-        output.Html(title);
+        output.Html(document.Title);
         output.Append("</title>\n<style>\n");
         output.Append(FontCss.Value);
         output.Append("""
@@ -112,7 +112,8 @@ public static class HtmlDetailedReportWriter
         using var writer = new BoundedWriter(output);
         var renderer = new HtmlRenderer(writer);
         Pipeline.Setup(renderer);
-        DetailedReportPresentation.Configure(renderer, markdown, token);
+        DetailedReportPresentation.Configure(renderer, markdown, token,
+            workItemDetails: document.Snapshot.Request.IsTeams && document.Snapshot.Request.Analysis == "workItems");
         codeBlocks.Configure(renderer);
         renderer.Render(body);
         writer.Flush();

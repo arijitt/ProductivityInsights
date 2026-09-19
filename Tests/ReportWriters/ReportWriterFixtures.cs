@@ -213,7 +213,8 @@ public static class ReportWriterFixtures
         Contains(markdown, "ORG-A:REPO-TWO:SAME-SHA", "Repository-qualified commit evidence.");
         var html = HtmlSummaryReportWriter.Write(document, "git.md");
         AssertSummaryShape(html, "gitCommits");
-        Contains(html, "Author: Same Name", "HTML pair attribution is explicit.");
+        Contains(html, "\U0001F464 Same Name", "Summary HTML preserves the author icon and identity.");
+        Contains(html, "\u270D\uFE0F Same Name", "Summary HTML preserves the committer icon and identity.");
         NotContains(html, "file13", "All-file details stay in Markdown, not the HTML summary.");
 
         var highCounts = snapshot with

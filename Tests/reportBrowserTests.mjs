@@ -12,6 +12,7 @@ const url = process.argv[2] ?? "http://127.0.0.1:5187/";
 const fixture = process.argv[3] ?? "gitCommits";
 const collectedIncidentFixture = fixture === "incident-available-export" || fixture === "incident-unkeyed-export";
 const incidentFixture = fixture === "incidentManagement" || collectedIncidentFixture;
+const roleIconFixture = fixture === "git-role-icons";
 const artifacts = process.env.REPORT_TEST_ARTIFACTS;
 if (artifacts) await mkdir(artifacts, { recursive: true });
 const browserPath = [
@@ -152,8 +153,26 @@ try {
     await until(() => evaluate("!!document.querySelector('.analysis-export-btn') && !!window.Blazor"), "prepared application");
     assert.equal(await evaluate("typeof window.Radzen"), "object", "Radzen static assets did not load");
     // A server circuit event proves hydration, rather than clicking a prerender-only button.
-    await until(() => evaluate("!!document.querySelector('.commit-summary-card') || (document.querySelector('.analysis-summary-table button')?.click(), false)"), "interactive contributor expansion");
+    await until(() => evaluate("!!document.querySelector('.commit-summary-card,.work-item-entry') || (document.querySelector('.analysis-summary-table button')?.click(), false)"), "interactive contributor expansion");
+    assert.equal(await evaluate("document.querySelector('.analysis-export-btn').textContent.trim()"), '\u{1F4E5} Export Reports',
+        "The export button must retain its icon and show only Export Reports without file extensions");
     const before = await evaluate("({html:document.querySelector('.analysis-summary-table').innerHTML,heading:document.querySelector('.table-title-header').textContent})");
+    const onlineWorkFields = fixture === "workItems" ? await evaluate(`Object.fromEntries([...document.querySelectorAll('.work-item-info strong')]
+        .map(node => { const match = /^(\\S+)\\s+(.+:)$/.exec(node.textContent);
+            return [match[2],{icon:match[1],value:node.parentElement.textContent.slice(node.textContent.length).trim()}]; }))`) : {};
+    const onlineWorkSummary = fixture === "workItems"
+        ? await evaluate("[...document.querySelectorAll('.contributor-summary > div')].map(node => node.textContent.trim())") : [];
+    const onlineRoleIcons = await evaluate(`Object.fromEntries([...document.querySelectorAll('.commit-entry div')]
+        .map(node => /^(\\S+)\\s+(Author|Committer):/.exec(node.textContent.trim()))
+        .filter(Boolean).map(match => [match[2] + ':',match[1]]))`);
+    const onlineHierarchyExpression = `(() => {
+        const nodes = [...document.querySelectorAll('.org-tree-container li.org-tree-node')];
+        return nodes.map(node => ({
+            name:node.querySelector(':scope > .org-tree-row .fw-bold').textContent,
+            parent:nodes.indexOf(node.parentElement.closest('li.org-tree-node'))
+        }));
+    })()`;
+    const onlineHierarchy = await evaluate(onlineHierarchyExpression);
     assert(before.heading.includes("Example Manager"), "Teams heading lost its manager");
     assert(before.heading.includes(incidentFixture ? "1 owning team" : "1 selection"), "Teams heading lost its source count");
     if (fixture === "stale-module") {
@@ -313,6 +332,46 @@ try {
                         roster:document.querySelectorAll('.report-roster-member').length,
                         rosterLinks:document.querySelectorAll('.report-roster-member a.report-member-link').length,
                         rosterNames:[...document.querySelectorAll('.report-roster-member a.report-member-link')].map(link => link.textContent),
+                        detailLines:[...document.querySelectorAll('div.report-line')].map(node => node.textContent),
+                        workItemSummaries:[...document.querySelectorAll('h3.report-person-heading')].map(heading => {
+                            const section = heading.nextElementSibling;
+                            return section?.matches('.report-lines') && section.textContent.trim().startsWith('\u{1F4CA} Summary for ')
+                                ? {person:heading.textContent,lines:[...section.children].map(node => node.textContent.trim())} : null;
+                        }).filter(Boolean),
+                        workItemEntries:[...document.querySelectorAll('h4.report-record-heading')]
+                            .filter(node => node.textContent.startsWith('\u{1F4CB} Work Item #'))
+                            .map(node => ({heading:node.textContent,fields:[...node.parentElement.querySelectorAll(':scope > div.report-line')]
+                                .map(line => {
+                                    const label = line.querySelector(':scope > .report-label');
+                                    return {label:label?.textContent,icon:line.querySelector(':scope > .report-icon')?.textContent,
+                                        value:label?.nextSibling?.textContent.trim()};
+                                }).filter(field => field.label)})),
+                        workItemHistories:[...document.querySelectorAll('h5')]
+                            .filter(heading => /State Change History$/i.test(heading.textContent)).map(heading => {
+                                let text = '';
+                                for (let node = heading.nextElementSibling; node && !/^H[1-6]$/.test(node.tagName); node = node.nextElementSibling) {
+                                    if (node.querySelector('h1,h2,h3,h4,h5,h6')) break;
+                                    text += node.textContent;
+                                }
+                                return text;
+                            }),
+                        commitMetadataFields:[...document.querySelectorAll('div.report-line')].map(node => ({
+                            label:node.querySelector(':scope > .report-label')?.textContent,
+                            icon:node.querySelector(':scope > .report-icon')?.textContent
+                        })).filter(field => ['Commit ID:', 'Organization:', 'Repository ID:', 'Author date:', 'Committer date:'].includes(field.label)),
+                        commitRoleFields:[...document.querySelectorAll('div.report-line')].map(node => ({
+                            label:node.querySelector(':scope > .report-label')?.textContent,
+                            icon:node.querySelector(':scope > .report-icon')?.textContent
+                        })).filter(field => field.label === 'Author:' || field.label === 'Committer:'),
+                        personHeadings:[...document.querySelectorAll('h3.report-person-heading')].map(node => node.textContent),
+                        rosterHierarchy:(() => {
+                            const nodes = [...document.querySelectorAll('.report-roster-hierarchy li')];
+                            return nodes.map(node => ({
+                                name:node.querySelector(':scope > .report-roster-member a').textContent,
+                                parent:nodes.indexOf(node.parentElement.closest('li')),
+                                left:node.querySelector(':scope > .report-roster-member').getBoundingClientRect().left
+                            }));
+                        })(),
                         memberIncidentDetails:${incidentFixture} ? [...document.querySelectorAll('.report-roster-member a.report-member-link')].map(link => {
                             const heading = document.getElementById(link.hash.slice(1));
                             const buckets = [];
@@ -337,6 +396,8 @@ try {
                                 href:item.querySelector(':scope > a')?.getAttribute('href')
                             })),
                         viewIncidentLinks:[...document.querySelectorAll('a')].filter(link => link.textContent === 'View Incident').length,
+                        viewWorkItemLinks:[...document.querySelectorAll('a')].filter(link => link.textContent.trim().endsWith('View Work Item')).length,
+                        commitUrlLinks:[...document.querySelectorAll('a')].filter(link => link.textContent.trim() === '\u{1F310} URL').length,
                         brokenLinks:[...document.querySelectorAll('a[href^="#"]')].filter(link => {
                             const target = document.getElementById(link.hash.slice(1));
                             return !target || !target.matches('h3,h4,tr') || !target.textContent.trim();
@@ -366,6 +427,36 @@ try {
             assert.equal(detailView.rosterLinks, detailView.roster, "Every roster member needs an actionable detail link");
             assert.equal(detailView.brokenLinks, 0, "Offline report links must resolve to real detail headings or evidence rows");
             assert.equal(detailView.duplicateIds, 0, "Each anchor ID must appear only once");
+            if (fixture === "gitCommits" || roleIconFixture) {
+                for (const label of ['Source-qualified key:', 'Source memberships:', 'Author identity:', 'Committer identity:'])
+                    assert(!detailView.detailLines.some(line => line.startsWith(label)),
+                        "Redundant commit footer field must be absent: " + label);
+                for (const [label, icon] of Object.entries({
+                    'Commit ID:':'\u{1F511}', 'Organization:':'\u{1F3E2}', 'Repository ID:':'\u{1F5C2}\uFE0F',
+                    'Author date:':'\u{1F5D3}\uFE0F', 'Committer date:':'\u{1F4C5}'
+                })) {
+                    const fields = detailView.commitMetadataFields.filter(field => field.label === label);
+                    assert.equal(fields.length, roleIconFixture ? 3 : 2, "Remaining commit footer field must be retained: " + label);
+                    assert(fields.every(field => field.icon === icon), "Each commit must use the metadata icon for " + label);
+                }
+                assert.equal(detailView.commitUrlLinks, 0, "Detailed Git must omit the redundant URL link");
+                const commitUrls = detailView.recordedUrls.filter(link => link.href?.includes("/commits/"));
+                assert.equal(commitUrls.length, roleIconFixture ? 3 : 2);
+                assert(commitUrls.every(link => link.text === link.href), "Each commit's Recorded URL value must itself be clickable");
+                assert.deepEqual(onlineRoleIcons, { 'Author:': '\u{1F464}', 'Committer:': '\u270D\uFE0F' });
+                assert.equal(detailView.commitRoleFields.length, (roleIconFixture ? 3 : 2) * 2);
+                for (const field of detailView.commitRoleFields)
+                    assert.equal(field.icon, onlineRoleIcons[field.label], "Each exported commit role must use its on-screen icon");
+                assert(detailView.personHeadings.some(heading => heading.startsWith('\u270D\uFE0F Committer:')),
+                    "Committer detail headings must use the writing-hand icon without losing their h3 navigation target");
+            }
+            if (roleIconFixture) {
+                const pair = '\u{1F464} Author: Example Contributor / \u270D\uFE0F Committer: Zoe Lead';
+                assert.equal(detailView.cells.filter(cell => cell === pair).length, 2,
+                    "Both detailed summary tables must distinguish the author/committer pair");
+                assert(detailView.personHeadings.some(heading => heading.includes(pair)),
+                    "The shared contribution heading must preserve both role icons");
+            }
             if (incidentFixture) {
                 assert(detailView.icmLinks > 0, "ICM paths must link to their report details");
                 assert.equal(detailView.memberIncidentDetails.length, detailView.roster);
@@ -385,10 +476,14 @@ try {
                 assert(detailView.recordedUrls.length > 0 && detailView.recordedUrls.every(link =>
                     /^https?:/.test(link.href ?? "") && link.text === link.href),
                     "Recorded incident URLs must be clickable at the field itself");
-                assert.deepEqual(detailView.rosterNames,
-                    [...detailView.rosterNames].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" })),
-                    "Incident Team Roster must appear in ascending first-name order");
             }
+            assert.equal(detailView.rosterHierarchy.length, 4, "Hierarchy fixture must include the manager, both branches and an indirect report");
+            assert.deepEqual(detailView.rosterHierarchy.map(node => node.parent), onlineHierarchy.map(node => node.parent),
+                "Detailed roster parent/report relationships must match the online hierarchy");
+            detailView.rosterHierarchy.forEach((node, index, nodes) => {
+                assert(node.name.includes(onlineHierarchy[index].name), "Export changed captured hierarchy order or member identity");
+                if (node.parent >= 0) assert(node.left > nodes[node.parent].left, "Reports must be visually nested beneath their actual manager");
+            });
             if (artifacts) {
                 const shot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
                 await writeFile(join(artifacts, `${fixture}-detailed-desktop.png`), Buffer.from(shot.data, "base64"));
@@ -439,13 +534,39 @@ try {
         }
         const detailText = detailView.text;
         assert(detailText.includes("Example Contributor"));
-        if (fixture === "gitCommits" || fixture === "large" || fixture === "workItems" || incidentFixture) {
+        if (fixture === "gitCommits" || roleIconFixture || fixture === "large" || fixture === "workItems" || incidentFixture) {
             const workItems = fixture === "workItems";
             const incidents = incidentFixture;
             const incidentCounts = collectedIncidentFixture ? ["0", "1", "0", "1", "1"] : ["0", "1", "1", "1", "1"];
             if (workItems) {
+                assert.equal(detailView.workItemSummaries.length, 4, "Every roster member needs a per-person summary");
+                const summary = detailView.workItemSummaries.find(summary => summary.person.includes('Example Contributor'));
+                assert(summary && onlineWorkSummary.length > 0);
+                for (const line of onlineWorkSummary)
+                    assert(summary.lines.includes(line), "The per-person summary must match the on-screen value: " + line);
+                for (const zero of detailView.workItemSummaries.filter(summary => !summary.person.includes('Example Contributor')))
+                    assert(zero.lines.includes('Total Work Items Completed: 0') && zero.lines.includes('Work Items with Active Work Time: 0 of 0'),
+                        "Zero-activity members must remain explicit without invented work");
+                assert.equal(detailView.workItemHistories.length, 2, "Both work-item history locations must remain present");
+                assert(detailView.workItemHistories.every(history => history.includes('Example Contributor')
+                    && history.includes('email: dev@example.test') && !history.includes('principal:') && !history.includes('ID:')),
+                    "State histories must retain names and emails without Principal or ID annotations");
+                assert.equal(detailView.viewWorkItemLinks, 0, "Work-item details must omit separate View Work Item links");
+                assert.equal(detailView.recordedUrls.length, 2, "Recorded URL must remain in both member details and the audit appendix");
+                assert(detailView.recordedUrls.every(link => link.href === 'https://example.test/item/42' && link.text === link.href),
+                    "Each work item's Recorded URL value must itself be clickable in both detail locations");
+                assert.equal(detailView.workItemEntries.length, 1, "Each work item needs a detailed entry under its member");
+                assert.equal(detailView.workItemEntries[0].heading, '\u{1F4CB} Work Item #42 - Task');
+                for (const [label, expected] of Object.entries(onlineWorkFields)) {
+                    const field = detailView.workItemEntries[0].fields.find(field => field.label === label);
+                    assert(field, "Detailed work item is missing " + label);
+                    assert.deepEqual({icon:field.icon,value:field.value}, expected,
+                        "Work-item details must match the on-screen field value and icon: " + label);
+                }
+                assert(detailView.workItemEntries[0].fields.some(field => field.label === 'Assignee:' && field.value.includes('dev@example.test')));
                 assert(detailText.includes("\u{1F3C6} TEAM WORK ITEM COMPLETION DETAILS BY PERSON"));
-                assert(detailText.includes("New \u2192 Active by Example Contributor on 2026-07-09"));
+                assert(detailText.includes("2026-07-09 12:00:00 - Example Contributor")
+                    && detailText.includes("New \u2192 Active (spent 1d in 'New')"));
                 assert(detailText.includes("State change history") && detailText.includes("Total time by state"));
                 assert(detailText.indexOf("TEAM WORK ITEM SUMMARY BY AREA PATH") < detailText.indexOf("Captured inputs and export query context"));
             } else if (incidents) {
@@ -520,6 +641,10 @@ try {
                     if (incidents && index === 0) assert.equal(zero[1], "\u2014");
                 }
                 if (incidents) assert.deepEqual(report.tables[1].at(-1), ["\u{1F3C1} TOTAL", ...incidentCounts]);
+                if (roleIconFixture)
+                    for (const rows of report.tables)
+                        assert(rows.some(row => row[0] === '\u{1F464} Example Contributor / \u270D\uFE0F Zoe Lead'),
+                            "Both summary HTML tables must retain role icons and names without Author/Committer labels");
                 assert(!detailText.includes("Files Added") && !detailText.includes("Files Modified") && !detailText.includes("Files Deleted"),
                     "Git-only HTML file-count columns changed another format");
                 assert.equal(report.background, "rgb(30, 30, 30)");
@@ -569,6 +694,8 @@ try {
             }
         }
         assert.equal(await evaluate("document.querySelector('.analysis-summary-table').innerHTML"), before.html, "Export changed on-screen report markup");
+        assert.deepEqual(await evaluate(onlineHierarchyExpression), onlineHierarchy,
+            "Export must not modify the online hierarchy or omit its members");
     }
     if (fixture === "stale-module") {
         assert.deepEqual(interceptionErrors, []);

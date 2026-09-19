@@ -529,7 +529,7 @@ public static class ReportDocumentBuilder
     {
         var budget = new ReportInputBudget(token);
         var request = snapshot.Request;
-        if (request.Sources.IsDefault || request.Roster.IsDefault || snapshot.WorkItems.IsDefault
+        if (request.Sources.IsDefault || request.Roster.IsDefault || request.RosterParentIndices.IsDefault || snapshot.WorkItems.IsDefault
             || snapshot.Commits.IsDefault || snapshot.PullRequests.IsDefault || snapshot.Incidents.IsDefault
             || snapshot.IncidentActions.IsDefault || snapshot.CoverageNotes.IsDefault || snapshot.SkippedSources.IsDefault)
             throw new InvalidOperationException("A report collection is uninitialized, rather than a verified empty collection.");
@@ -542,6 +542,7 @@ public static class ReportDocumentBuilder
         if (request.IsTeams && availableSourceCount > 0
             && (long)request.Roster.Length * (availableSourceCount + 1L) > ReportRenderingLimits.MaximumSummaryRows)
             throw new ReportSizeLimitException("The captured roster/available-source combinations exceed the 100,000-row summary construction limit. Select fewer sources or members; no rows were omitted.");
+        ValidateRosterHierarchy(request, token);
         budget.Record(request.Analysis, request.View, request.TimeZone, request.Manager, request.TrendPeriod,
             request.EffectiveStartLiteral, request.EffectiveEndLiteral, request.EffectiveBoundsOrigin);
         var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -613,6 +614,28 @@ public static class ReportDocumentBuilder
                 || item.ActionId is null || (item.ActionId.Length == 0 ? !request.IsTeams : string.IsNullOrWhiteSpace(item.ActionId))
                 || string.IsNullOrWhiteSpace(item.ActionType))
                 throw new InvalidOperationException("An incident action has incomplete source-qualified identity.");
+        }
+    }
+
+    private static void ValidateRosterHierarchy(ReportRequest request, CancellationToken token)
+    {
+        var parents = request.RosterParentIndices;
+        if (parents.IsEmpty) return;
+        if (!request.IsTeams || parents.Length != request.Roster.Length || parents[0] is not null)
+            throw new InvalidOperationException("Captured roster hierarchy must cover the complete roster and start with its manager.");
+        var ancestors = new Stack<int>();
+        ancestors.Push(0);
+        for (var index = 1; index < parents.Length; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (parents[index] is not { } parent || parent < 0 || parent >= index)
+                throw new InvalidOperationException("Captured roster hierarchy contains an invalid manager reference.");
+            while (ancestors.Count > 0 && ancestors.Peek() != parent) ancestors.Pop();
+            if (ancestors.Count == 0)
+                throw new InvalidOperationException("Captured roster hierarchy is not in the displayed parent/report order.");
+            if (ancestors.Count > ReportRenderingLimits.MaximumRosterDepth)
+                throw new ReportSizeLimitException("Captured roster hierarchy exceeds the export depth limit. No members were omitted.");
+            ancestors.Push(index);
         }
     }
 

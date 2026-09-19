@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using ProductivityInsights.Models.Reports;
+using ProductivityInsights.Utilities;
 
 namespace ProductivityInsights.Services.Reports;
 
@@ -192,9 +193,9 @@ public static class MarkdownReportWriter
                             token.ThrowIfCancellationRequested();
                             var period = item.Periods[index];
                             var next = index + 1 < item.Periods.Length ? item.Periods[index + 1] : null;
-                            Row(period.State, ReportFormatting.Date(period.EnteredAt), ReportFormatting.Identity(period.Actor),
+                            Row(period.State, ReportFormatting.Date(period.EnteredAt), WorkItemHistoryActor(period.Actor),
                                 period.ExitedAt.HasValue ? ReportFormatting.Date(period.ExitedAt) : "Ongoing at report as-of",
-                                next?.State, next is null ? "-" : ReportFormatting.Identity(next.Actor),
+                                next?.State, next is null ? "-" : WorkItemHistoryActor(next.Actor),
                                 TimeSpan.FromDays(period.Days).ToString("c", CultureInfo.InvariantCulture),
                                 period.Days.ToString("F6", CultureInfo.InvariantCulture));
                         }
@@ -209,10 +210,13 @@ public static class MarkdownReportWriter
                         }
                         output.Append("\n");
                     }
-                    Link(record.Url, "View Work Item");
+                    Link(record.Url, "View Work Item", linkRecordedUrl: navigation is not null && Request.IsTeams);
                 }
             }
         }
+
+        private string WorkItemHistoryActor(ReportIdentity actor) =>
+            ReportFormatting.Identity(actor, includePrincipalAndId: navigation is null || !Request.IsTeams);
 
         private void WorkStatistics(ImmutableArray<WorkItemDocument> items)
         {
@@ -251,9 +255,12 @@ public static class MarkdownReportWriter
             {
                 token.ThrowIfCancellationRequested();
                 var role = member.Contributor.StartsWith("Author:", StringComparison.Ordinal) ? "Contributor" : "Committer";
+                var roleIcon = navigation is not null && Request.IsTeams && role == "Committer"
+                    ? GitReportPresentation.CommitterIcon : GitReportPresentation.AuthorIcon;
                 navigation?.MemberSection(output.Length, member.ContributorKey,
                     groups[member.ContributorKey].SelectMany(commit => new[] { commit.Entity.Record.Author, commit.Entity.Record.Committer }));
-                BoxHeading($"\U0001F464 {role}: {presentation.Contributor(member)} - {member.Commits} commits (+{member.Added}/-{member.Deleted} lines)");
+                var contributor = navigation is null ? presentation.Contributor(member) : presentation.ContributorForHtml(member);
+                BoxHeading($"{roleIcon} {role}: {contributor} - {member.Commits} commits (+{member.Added}/-{member.Deleted} lines)");
                 foreach (var repository in groups[member.ContributorKey].GroupBy(
                     commit => (commit.Entity.Record.Organization, commit.Entity.Record.RepositoryId)))
                 {
@@ -268,7 +275,8 @@ public static class MarkdownReportWriter
                         Rule();
                         Line($"\U0001F504 Commit: {record.Id[..Math.Min(8, record.Id.Length)]}...");
                         Line("Author: " + GitReportPresentation.Identity(record.Author));
-                        Line("Committer: " + GitReportPresentation.Identity(record.Committer));
+                        Line((navigation is not null && Request.IsTeams ? GitReportPresentation.CommitterIcon + " " : "")
+                            + "Committer: " + GitReportPresentation.Identity(record.Committer));
                         Line("Date: " + GitReportPresentation.Timestamp(record.CommitterDate));
                         Line("Message: (Full commit message)");
                         CodeBlock(record.Message);
@@ -277,30 +285,43 @@ public static class MarkdownReportWriter
                         foreach (var file in record.Files)
                             Line($"  \U0001F4C4 {file.Path} [{GitReportPresentation.ChangeType(file.ChangeType)}] ({GitReportPresentation.FileDelta(file)})");
                         Line($"\U0001F517 Parent count (not PR evidence): {record.ParentCount}");
-                        Line("Commit ID: " + record.Id);
-                        Line("Organization: " + record.Organization);
-                        Line("Repository ID: " + record.RepositoryId);
-                        Line("Source-qualified key: " + record.EntityKey);
-                        Line("Source memberships: " + SourceEvidence(commit.Entity.SourceKeys));
-                        Line("Author identity: " + ReportFormatting.Identity(record.Author));
-                        Line("Committer identity: " + ReportFormatting.Identity(record.Committer));
-                        Line("Author date: " + ReportFormatting.Date(record.AuthorDate));
-                        Line("Committer date: " + ReportFormatting.Date(record.CommitterDate));
-                        Link(record.Url, "\U0001F310 URL");
+                        GitDetailField("\U0001F511", "Commit ID", record.Id);
+                        GitDetailField("\U0001F3E2", "Organization", record.Organization);
+                        GitDetailField("\U0001F5C2\uFE0F", "Repository ID", record.RepositoryId);
+                        if (navigation is null || !Request.IsTeams)
+                        {
+                            Line("Source-qualified key: " + record.EntityKey);
+                            Line("Source memberships: " + SourceEvidence(commit.Entity.SourceKeys));
+                            Line("Author identity: " + ReportFormatting.Identity(record.Author));
+                            Line("Committer identity: " + ReportFormatting.Identity(record.Committer));
+                        }
+                        GitDetailField("\U0001F5D3\uFE0F", "Author date", ReportFormatting.Date(record.AuthorDate));
+                        GitDetailField("\U0001F4C5", "Committer date", ReportFormatting.Date(record.CommitterDate));
+                        Link(record.Url, "\U0001F310 URL", linkRecordedUrl: navigation is not null && Request.IsTeams);
                         Rule();
                     }
                 }
             }
         }
 
+        private void GitDetailField(string icon, string label, string value) =>
+            Line((navigation is not null && Request.IsTeams ? icon + " " : "") + label + ": " + value);
+
         private void TeamRoster()
         {
             if (Request.IsTeams)
             {
                 BoxHeading($"\U0001F465 TEAM ROSTER ({Request.Roster.Length} members):");
-                Line("Captured roster; reporting levels are not recorded in the export snapshot.");
+                var supportsHierarchy = navigation is not null && Request.Analysis is "incidentManagement" or "gitCommits" or "workItems";
+                var showHierarchy = supportsHierarchy && !Request.RosterParentIndices.IsEmpty;
+                if (showHierarchy) navigation!.RosterHierarchy(output.Length);
+                Line(showHierarchy
+                    ? "Captured reporting hierarchy; manager/report relationships and sibling order match the online display."
+                    : supportsHierarchy
+                        ? "Captured roster; reporting hierarchy was not captured for this run. Run the analysis again to include it."
+                        : "Captured roster; reporting levels are not recorded in the export snapshot.");
                 var roster = Request.Roster.AsEnumerable();
-                if (navigation is not null && Request.Analysis == "incidentManagement")
+                if (navigation is not null && Request.Analysis == "incidentManagement" && !showHierarchy)
                     roster = roster.OrderBy(member => member.DisplayName.Split((char[]?)null, 2,
                             StringSplitOptions.RemoveEmptyEntries)[0], StringComparer.OrdinalIgnoreCase)
                         .ThenBy(member => member.DisplayName.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -314,11 +335,14 @@ public static class MarkdownReportWriter
         {
             BoxHeading("\U0001F3C6 TEAM WORK ITEM COMPLETION DETAILS BY PERSON (Target State: Done):");
             Line("Overlapping selections are grouped together; each distinct work item appears once in this completion list.");
-            foreach (var member in presentation.OverallRows.Where(row => row.WorkItems != 0))
+            foreach (var member in presentation.OverallRows.Where(row => navigation is not null || row.WorkItems != 0))
             {
                 token.ThrowIfCancellationRequested();
                 navigation?.MemberSection(output.Length, member.ContributorKey);
-                BoxHeading($"\U0001F464 {presentation.Contributor(member)}: {ReportFormatting.Number(member.WorkItems)} work item(s) completed");
+                var contributor = member.WorkItems == 0 ? member.Contributor : presentation.Contributor(member);
+                BoxHeading($"\U0001F464 {contributor}: {ReportFormatting.Number(member.WorkItems)} work item(s) completed");
+                if (navigation is not null)
+                    TeamWorkItemPersonSummary(presentation.Contributor(member), presentation.Items(member).ToImmutableArray());
                 foreach (var group in presentation.Groups(member))
                 {
                     Rule();
@@ -328,6 +352,11 @@ public static class MarkdownReportWriter
                         token.ThrowIfCancellationRequested();
                         var record = item.Entity.Record;
                         Rule();
+                        if (navigation is not null)
+                        {
+                            TeamWorkItemRecordDetails(item);
+                            continue;
+                        }
                         Line($"    \u2022 [{record.Type}] #{ReportFormatting.Number(record.Id)} (P{record.Priority?.ToString(CultureInfo.InvariantCulture) ?? "?"}): {record.Title}");
                         if (item.Periods.IsEmpty)
                             Line("      No state history was supplied. Active-work duration is unknown, not zero.");
@@ -348,6 +377,76 @@ public static class MarkdownReportWriter
             }
             Rule();
             if (document.WorkItems.IsEmpty) Paragraph("No work items in the completed snapshot.");
+        }
+
+        private void TeamWorkItemPersonSummary(string contributor, ImmutableArray<WorkItemDocument> items)
+        {
+            Line("\U0001F4CA Summary for " + contributor);
+            Line("Total Work Items Completed: " + ReportFormatting.Number(items.Length));
+            foreach (var group in items.GroupBy(item => item.Entity.Record.Type)
+                .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal))
+                Line(group.Key + ": " + ReportFormatting.Number(group.Count()));
+            Line("\u23F1\uFE0F Time Analysis (Committed/Active/In Progress states only):");
+            var stats = ReportDocumentBuilder.DurationStatistics(
+                items.Where(item => item.ActiveWorkDays > 0).Select(item => item.ActiveWorkDays!.Value), token);
+            if (stats.Count > 0)
+            {
+                Line("Total Days: " + ReportFormatting.Decimal(stats.Total));
+                Line("Maximum Days: " + ReportFormatting.Decimal(stats.Maximum));
+                Line("Minimum Days: " + ReportFormatting.Decimal(stats.Minimum));
+                Line("Average Days: " + ReportFormatting.Decimal(stats.Average));
+                Line("Median Days: " + ReportFormatting.Decimal(stats.Median));
+            }
+            else
+                Line("No recorded positive active-work duration is available.");
+            Line($"Work Items with Active Work Time: {ReportFormatting.Number(stats.Count)} of {ReportFormatting.Number(items.Length)}");
+            var unavailable = items.Count(item => item.ActiveWorkDays is null);
+            if (unavailable > 0)
+                Line($"Work Items with Unavailable Active Work Time: {ReportFormatting.Number(unavailable)} of {ReportFormatting.Number(items.Length)}");
+            if (items.IsEmpty) Line("No work items for this contributor.");
+            output.Append("\n");
+        }
+
+        private void TeamWorkItemRecordDetails(WorkItemDocument item)
+        {
+            var record = item.Entity.Record;
+            Line($"\U0001F4CB Work Item #{ReportFormatting.Number(record.Id)} - {record.Type}");
+            Line("\U0001F4DD Title: " + record.Title);
+            Line("\U0001F504 State: " + record.State);
+            Line("\U0001F464 Assignee: " + ReportFormatting.Identity(record.Assignee));
+            if (record.Priority is { } priority)
+                Line("\u26A1 Priority: " + ReportFormatting.Number(priority));
+            Line("\U0001F4C5 Created Date: " + ReportFormatting.CompactTimestamp(record.CreatedAt));
+            if (record.ClosedAt is { } closed)
+            {
+                Line("\u2705 Closed Date: " + ReportFormatting.CompactTimestamp(closed));
+                Line("\u23F1\uFE0F Time to Complete: " + ReportFormatting.Decimal((closed - record.CreatedAt).TotalDays) + " days");
+            }
+            else
+                Line("\U0001F552 Last Changed: " + ReportFormatting.CompactTimestamp(record.ChangedAt));
+            if (!string.IsNullOrEmpty(record.AreaPath)) Line("\U0001F4C2 Area Path: " + record.AreaPath);
+            if (!string.IsNullOrEmpty(record.IterationPath)) Line("\U0001F501 Iteration: " + record.IterationPath);
+            Line("\u23F1\uFE0F Time in Active Work: " + (item.ActiveWorkDays is { } active
+                ? ReportFormatting.Decimal(active) + " days" : "Unknown (insufficient state history)"));
+
+            Heading(5, "\U0001F4DC State Change History");
+            if (item.Periods.IsEmpty)
+                Paragraph("No state history was supplied. Active-work duration is unknown, not zero.");
+            else
+                for (var index = 0; index < item.Periods.Length; index++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var period = item.Periods[index];
+                    var duration = FormatUtilities.ToStringValue(TimeSpan.FromDays(period.Days));
+                    if (index + 1 < item.Periods.Length)
+                    {
+                        var next = item.Periods[index + 1];
+                        Line($"\U0001F552 {ReportFormatting.CompactTimestamp(next.EnteredAt)} - {WorkItemHistoryActor(next.Actor)}: {period.State} \u2192 {next.State} (spent {duration} in '{period.State}')");
+                    }
+                    else
+                        Line($"\U0001F552 Currently in {period.State} since {ReportFormatting.CompactTimestamp(period.EnteredAt)}; entered by {WorkItemHistoryActor(period.Actor)} ({duration}; ongoing at report as-of {ReportFormatting.CompactTimestamp(document.Snapshot.AsOf)}).");
+                }
+            Link(record.Url, "\U0001F310 View Work Item", linkRecordedUrl: true);
         }
 
         private void TeamWorkItemSummary(WorkItemReportPresentation presentation, bool byArea)
@@ -380,7 +479,7 @@ public static class MarkdownReportWriter
             BoxHeading($"\U0001F4CA {heading} ({ReportFormatting.CalendarDate(Request.Start)} to {ReportFormatting.CalendarDate(Request.End)}):");
             Header(GitReportPresentation.Headers(bySource));
             foreach (var row in rows)
-                Row(presentation.Cells(row, bySource));
+                Row(presentation.Cells(row, bySource, roleIcons: navigation is not null));
             output.Append("\n");
             if (rows.IsEmpty) Paragraph(document.Snapshot.AllSourcesSkipped
                 ? "No selected source could be collected. Activity is unavailable, not zero."

@@ -16,6 +16,7 @@ public static class ReportRenderingLimits
     public const int MaximumRecords = 200_000;
     public const int MaximumSummaryRows = 100_000;
     public const int MaximumIdentities = 4096;
+    public const int MaximumRosterDepth = 64;
 }
 
 public sealed class ReportSizeLimitException(string message) : InvalidOperationException(message);
@@ -251,12 +252,14 @@ internal static class ReportFormatting
             yield return ("Effective bounds origin", request.EffectiveBoundsOrigin);
     }
 
-    public static string Identity(ReportIdentity identity)
+    public static string Identity(ReportIdentity identity) => Identity(identity, includePrincipalAndId: true);
+
+    public static string Identity(ReportIdentity identity, bool includePrincipalAndId)
     {
         var fields = new List<string> { string.IsNullOrWhiteSpace(identity.Name) ? "Unknown" : identity.Name };
         if (!string.IsNullOrWhiteSpace(identity.Email)) fields.Add($"email: {identity.Email}");
-        if (!string.IsNullOrWhiteSpace(identity.PrincipalName)) fields.Add($"principal: {identity.PrincipalName}");
-        if (!string.IsNullOrWhiteSpace(identity.Id)) fields.Add($"ID: {identity.Id}");
+        if (includePrincipalAndId && !string.IsNullOrWhiteSpace(identity.PrincipalName)) fields.Add($"principal: {identity.PrincipalName}");
+        if (includePrincipalAndId && !string.IsNullOrWhiteSpace(identity.Id)) fields.Add($"ID: {identity.Id}");
         return Join("; ", fields);
     }
 

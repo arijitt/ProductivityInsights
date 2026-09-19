@@ -5,6 +5,9 @@ namespace ProductivityInsights.Services.Reports;
 
 internal sealed class GitReportPresentation
 {
+    public const string AuthorIcon = "\U0001F464";
+    public const string CommitterIcon = "\u270D\uFE0F";
+
     private readonly ReportRequest request;
     private readonly CancellationToken token;
     private readonly Dictionary<string, ReportSource> sources;
@@ -12,6 +15,7 @@ internal sealed class GitReportPresentation
     private readonly HashSet<string> ambiguousRepositories;
     private readonly HashSet<string> multipleBranches;
     private readonly Dictionary<string, string> contributorNames;
+    private readonly Dictionary<string, (string Author, string Committer)> contributorRoles = new(StringComparer.Ordinal);
 
     public GitReportPresentation(ReportDocument document, CancellationToken token)
     {
@@ -52,7 +56,7 @@ internal sealed class GitReportPresentation
         ? ["\U0001F464 Team Member", "\U0001F4C2 Repository", "\U0001F4BE Commits", "\U0001F500 PRs Merged", "\u2795 Lines", "\u2796 Lines"]
         : ["\U0001F464 Team Member", "\U0001F4BE Commits", "\U0001F500 PRs Merged", "\u2795 Lines", "\u2796 Lines", "\U0001F4C2 Repositories"];
 
-    public string[] Cells(ReportSummaryRow row, bool bySource)
+    public string[] Cells(ReportSummaryRow row, bool bySource, bool roleIcons = false)
     {
         token.ThrowIfCancellationRequested();
         var counts = new[]
@@ -60,15 +64,32 @@ internal sealed class GitReportPresentation
             ReportFormatting.Number(row.Commits), ReportFormatting.Number(row.PullRequests),
             "+" + ReportFormatting.Number(row.Added), "-" + ReportFormatting.Number(row.Deleted)
         };
+        var contributor = roleIcons ? ContributorForHtml(row) : Contributor(row);
         return bySource
-            ? [Contributor(row), row.SourceKey is null ? "\u2014" : Repository(sources[row.SourceKey]), .. counts]
-            : [Contributor(row), .. counts, ReportFormatting.Join(", ", row.SourceKeys
+            ? [contributor, row.SourceKey is null ? "\u2014" : Repository(sources[row.SourceKey]), .. counts]
+            : [contributor, .. counts, ReportFormatting.Join(", ", row.SourceKeys
                 .OrderBy(key => sourceOrder[key]).Select(key => sources[key])
                 .Select(source => ambiguousRepositories.Contains(source.Scope) ? QualifiedRepository(source) : source.Scope)
                 .Distinct(StringComparer.OrdinalIgnoreCase), token)];
     }
 
     public string Contributor(ReportSummaryRow row) => contributorNames[row.ContributorKey];
+
+    public string[] SummaryCells(ReportSummaryRow row, bool bySource)
+    {
+        var cells = Cells(row, bySource);
+        cells[0] = ContributorForHtml(row, includeRoleLabels: false);
+        return cells;
+    }
+
+    public string ContributorForHtml(ReportSummaryRow row, bool includeRoleLabels = true)
+    {
+        if (!request.IsTeams || !contributorRoles.TryGetValue(row.ContributorKey, out var roles))
+            return Contributor(row);
+        return includeRoleLabels
+            ? $"{AuthorIcon} Author: {roles.Author} / {CommitterIcon} Committer: {roles.Committer}"
+            : $"{AuthorIcon} {roles.Author} / {CommitterIcon} {roles.Committer}";
+    }
 
     private Dictionary<string, string> ContributorNames(ReportDocument document)
     {
@@ -90,20 +111,31 @@ internal sealed class GitReportPresentation
             .Where(group => group.Skip(1).Any()).Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var key in names.Keys.ToArray())
             if (duplicateNames.Contains(names[key])) names[key] = labels[key];
+        var pairs = new Dictionary<string, (string Author, string Committer)>(StringComparer.Ordinal);
         foreach (var commit in document.Commits)
         {
             token.ThrowIfCancellationRequested();
             var author = catalog.Get(commit.Entity.Record.Author).Key;
             var committer = catalog.Get(commit.Entity.Record.Committer).Key;
             if (author != committer)
+            {
                 names[commit.ContributorKey] = $"Author: {names[author]} / Committer: {names[committer]}";
+                pairs[commit.ContributorKey] = (author, committer);
+            }
         }
         var rows = document.OverallRows.ToDictionary(row => row.ContributorKey,
             row => names.GetValueOrDefault(row.ContributorKey, row.Contributor), StringComparer.Ordinal);
         var collisions = rows.GroupBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Skip(1).Any()).Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var row in document.OverallRows)
-            if (collisions.Contains(rows[row.ContributorKey])) rows[row.ContributorKey] = row.Contributor;
+        {
+            var qualified = collisions.Contains(rows[row.ContributorKey]);
+            if (qualified) rows[row.ContributorKey] = row.Contributor;
+            if (pairs.TryGetValue(row.ContributorKey, out var pair))
+                contributorRoles[row.ContributorKey] = qualified
+                    ? (labels[pair.Author], labels[pair.Committer])
+                    : (names[pair.Author], names[pair.Committer]);
+        }
         return rows;
     }
 

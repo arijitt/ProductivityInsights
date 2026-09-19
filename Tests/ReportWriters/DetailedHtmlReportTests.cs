@@ -25,6 +25,10 @@ public static class DetailedHtmlReportTests
         Navigation();
         IncidentRosterOrdering();
         IncidentRecordedUrls();
+        GitRecordedUrls();
+        WorkItemRecordedUrls();
+        GitRedundantIdentityFields();
+        GitDetailMetadataIcons();
         IncidentMemberActivityDetails();
         LimitsAndCancellation();
     }
@@ -279,9 +283,205 @@ public static class DetailedHtmlReportTests
             && MarkdownReportWriter.Write(baseline).Contains("[View Incident]", StringComparison.Ordinal),
             "Incident Details view and legacy Markdown must retain their existing URL presentation.");
 
-        static MatchCollection RecordedUrlFields(string html) =>
-            Regex.Matches(html, @"<li>\s*<strong>Recorded URL:</strong>\s*(.*?)</li>", RegexOptions.Singleline);
     }
+
+    private static MatchCollection RecordedUrlFields(string html) =>
+        Regex.Matches(html, @"<li>\s*<strong>Recorded URL:</strong>\s*(.*?)</li>", RegexOptions.Singleline);
+
+    private static void GitRecordedUrls()
+    {
+        var baseline = ReportWriterFixtures.GitSnapshot() with { PullRequests = [] };
+        foreach (var url in new[]
+        {
+            "https://example.test/commits/1",
+            "http://example.test/commits/1)?x=one&y=two#details",
+            "https://example.test/commits/1?label=<tag>|`&name=example"
+        })
+        {
+            var snapshot = baseline with { Commits = baseline.Commits.Select(commit => commit with { Url = url }).ToImmutableArray() };
+            var html = HtmlDetailedReportWriter.Write(snapshot);
+            var fields = RecordedUrlFields(html);
+            var expectedHref = new Uri(url).AbsoluteUri.Replace("|", "%7C", StringComparison.Ordinal)
+                .Replace("<", "%3C", StringComparison.Ordinal).Replace(">", "%3E", StringComparison.Ordinal)
+                .Replace("`", "%60", StringComparison.Ordinal);
+            Require(fields.Count == ReportDocumentBuilder.Build(snapshot).Commits.Length
+                && fields.All(field => Links(field.Value) is [var link] && link.Text == url && link.Href == expectedHref)
+                && !Links(html).Any(link => link.Text == "\U0001F310 URL"),
+                "Every Teams Git commit must hyperlink its exact Recorded URL instead of retaining the redundant URL link.");
+            AssertLinks(html);
+        }
+        foreach (var url in new[]
+        {
+            "", "javascript:alert(1)", "data:text/html,<script>bad</script>", "file:///C:/report.html",
+            "https://user@example.test/commits/1", "https://example.test/\ncommit"
+        })
+        {
+            var html = HtmlDetailedReportWriter.Write(baseline with
+            {
+                Commits = baseline.Commits.Select(commit => commit with { Url = url }).ToImmutableArray()
+            });
+            var fields = RecordedUrlFields(html);
+            Require(fields.Count > 0 && fields.All(field => Links(field.Value).Length == 0)
+                && !Links(html).Any(link => link.Text == "\U0001F310 URL") && !html.Contains("<script>", StringComparison.Ordinal),
+                "Missing or unsafe commit URLs must remain encoded text, not become actionable links.");
+            if (url.Length != 0)
+                Require(html.Contains("Unsafe or unsupported URL: retained as text, not linked.", StringComparison.Ordinal),
+                    "Rejected commit URLs must retain the existing explicit warning.");
+        }
+        foreach (var view in new[] { "details", "trends" })
+        {
+            var html = HtmlDetailedReportWriter.Write(baseline with { Request = baseline.Request with { View = view } });
+            Require(Links(html).Any(link => link.Text == "\U0001F310 URL")
+                && RecordedUrlFields(html).All(field => Links(field.Value).Length == 0),
+                "Non-Teams Git views must retain their existing URL presentation.");
+        }
+        Require(MarkdownReportWriter.Write(baseline).Contains("[\U0001F310 URL]", StringComparison.Ordinal)
+            && Links(HtmlDetailedReportWriter.Write(ReportWriterFixtures.GitSnapshot())).Any(link => link.Text.StartsWith("View PR ", StringComparison.Ordinal)),
+            "Legacy Markdown and completed-PR evidence links must remain unchanged.");
+    }
+
+    private static void WorkItemRecordedUrls()
+    {
+        var baseline = ReportWriterFixtures.WorkSnapshot();
+        var expectedFields = ReportDocumentBuilder.Build(baseline).WorkItems.Length * 2;
+        foreach (var url in new[]
+        {
+            "https://example.test/workitems/1",
+            "http://example.test/workitems/1)?x=one&y=two#details",
+            "https://example.test/workitems/1?label=<tag>|`&name=example"
+        })
+        {
+            var snapshot = baseline with
+            {
+                WorkItems = baseline.WorkItems.Select(item => item with { Url = url }).ToImmutableArray()
+            };
+            var html = HtmlDetailedReportWriter.Write(snapshot);
+            var fields = RecordedUrlFields(html);
+            var expectedHref = new Uri(url).AbsoluteUri.Replace("|", "%7C", StringComparison.Ordinal)
+                .Replace("<", "%3C", StringComparison.Ordinal).Replace(">", "%3E", StringComparison.Ordinal)
+                .Replace("`", "%60", StringComparison.Ordinal);
+            Require(fields.Count == expectedFields
+                && fields.All(field => Links(field.Value) is [var link] && link.Text == url && link.Href == expectedHref)
+                && !Links(html).Any(link => link.Text.EndsWith("View Work Item", StringComparison.Ordinal)),
+                "Every work item must hyperlink Recorded URL in both the member details and audit appendix, without separate View Work Item links.");
+            AssertLinks(html);
+        }
+        foreach (var url in new[]
+        {
+            "", "javascript:alert(1)", "data:text/html,<script>bad</script>", "file:///C:/report.html",
+            "https://user@example.test/workitems/1", "https://example.test/\nworkitem"
+        })
+        {
+            var html = HtmlDetailedReportWriter.Write(baseline with
+            {
+                WorkItems = baseline.WorkItems.Select(item => item with { Url = url }).ToImmutableArray()
+            });
+            var fields = RecordedUrlFields(html);
+            Require(fields.Count == expectedFields && fields.All(field => Links(field.Value).Length == 0)
+                && !Links(html).Any(link => link.Text.EndsWith("View Work Item", StringComparison.Ordinal))
+                && !html.Contains("<script>", StringComparison.Ordinal),
+                "Missing or unsafe work-item URLs must remain encoded text in both detail locations.");
+            if (url.Length != 0)
+                Require(html.Contains("Unsafe or unsupported URL: retained as text, not linked.", StringComparison.Ordinal),
+                    "Rejected work-item URLs must retain their existing warning.");
+        }
+        var details = HtmlDetailedReportWriter.Write(baseline with { Request = baseline.Request with { View = "details" } });
+        Require(Links(details).Any(link => link.Text == "View Work Item")
+            && RecordedUrlFields(details).All(field => Links(field.Value).Length == 0)
+            && MarkdownReportWriter.Write(baseline).Contains("[View Work Item]", StringComparison.Ordinal),
+            "Non-Teams Work Items and legacy Markdown must retain their original URL presentation.");
+    }
+
+    private static void GitRedundantIdentityFields()
+    {
+        string[] removed = ["Source-qualified key:", "Source memberships:", "Author identity:", "Committer identity:"];
+        var recordedText = string.Join("\n", removed.Select(label => label + " original commit message text"));
+        var baseline = ReportWriterFixtures.GitSnapshot();
+        var snapshot = baseline with
+        {
+            Commits = baseline.Commits.Select(commit => commit with { Message = recordedText }).ToImmutableArray()
+        };
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var html = HtmlDetailedReportWriter.Write(document);
+        var lines = DetailLines(html);
+        Require(removed.All(label => !lines.Any(line => line.StartsWith(label, StringComparison.Ordinal))),
+            "Only the four redundant footer fields must be omitted from Teams Git detailed commit blocks.");
+        foreach (var label in new[] { "Commit ID:", "Organization:", "Repository ID:", "Author date:", "Committer date:" })
+            Require(GitMetadataFields(html).Count(field => field.Label == label) == document.Commits.Length,
+                "Every commit must retain its remaining footer field: " + label);
+        foreach (var label in new[] { "\U0001F464 Author:", "\u270D\uFE0F Committer:" })
+            Require(lines.Count(line => line.StartsWith(label, StringComparison.Ordinal)) == document.Commits.Length,
+                "The top-of-commit author and committer entries must remain unchanged.");
+        var headers = Regex.Matches(html, @"<th\b[^>]*>(.*?)</th>", RegexOptions.Singleline)
+            .Select(header => Text(header.Groups[1].Value)).ToArray();
+        Require(headers.Contains("Source key") && headers.Contains("Identity ID") && headers.Contains("Source memberships")
+            && Text(html).Contains(recordedText, StringComparison.Ordinal),
+            "Captured source/identity context, PR memberships and matching text in recorded messages must not be removed.");
+        Require(HtmlSummaryReportWriter.Write(snapshot, "report_Detailed.html")
+            == HtmlSummaryReportWriter.Write(baseline, "report_Detailed.html"),
+            "Detailed-only field suppression must not change summary HTML.");
+        AssertLinks(html);
+
+        var markdown = MarkdownReportWriter.Write(baseline);
+        foreach (var label in removed)
+            Require(markdown.Contains(label, StringComparison.Ordinal), "Legacy Markdown must retain " + label);
+        foreach (var view in new[] { "details", "trends" })
+        {
+            var other = snapshot with { Request = snapshot.Request with { View = view } };
+            var otherLines = DetailLines(HtmlDetailedReportWriter.Write(other));
+            foreach (var label in removed)
+                Require(otherLines.Count(line => line.StartsWith(label, StringComparison.Ordinal)) == document.Commits.Length,
+                    "Non-Teams Git reports must retain every original footer field: " + label);
+        }
+
+        static string[] DetailLines(string content) =>
+            Regex.Matches(content, @"<div class=""report-line"">(.*?)</div>", RegexOptions.Singleline)
+                .Select(line => Text(line.Groups[1].Value)).ToArray();
+    }
+
+    private static void GitDetailMetadataIcons()
+    {
+        var snapshot = ReportWriterFixtures.GitSnapshot();
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var html = HtmlDetailedReportWriter.Write(document);
+        var fields = GitMetadataFields(html);
+        var expected = new (string Label, string Icon, Func<GitReportRecord, string> Value)[]
+        {
+            ("Commit ID:", "\U0001F511", commit => commit.Id),
+            ("Organization:", "\U0001F3E2", commit => commit.Organization),
+            ("Repository ID:", "\U0001F5C2\uFE0F", commit => commit.RepositoryId),
+            ("Author date:", "\U0001F5D3\uFE0F", commit => commit.AuthorDate.ToString("O", System.Globalization.CultureInfo.InvariantCulture)),
+            ("Committer date:", "\U0001F4C5", commit => commit.CommitterDate.ToString("O", System.Globalization.CultureInfo.InvariantCulture))
+        };
+        Require(fields.Length == document.Commits.Length * expected.Length,
+            "Each Teams Git commit must retain exactly one of each requested metadata field.");
+        foreach (var (label, icon, value) in expected)
+        {
+            var actual = fields.Where(field => field.Label == label).ToArray();
+            Require(actual.Length == document.Commits.Length && actual.All(field => field.Icon == icon)
+                && actual.Select(field => field.Value).Order(StringComparer.Ordinal).SequenceEqual(
+                    document.Commits.Select(commit => value(commit.Entity.Record)).Order(StringComparer.Ordinal)),
+                "Metadata icons must preserve each exact value and timestamp: " + label);
+        }
+        var markdown = MarkdownReportWriter.Write(document);
+        foreach (var (label, icon, _) in expected)
+            Require(!markdown.Contains(icon + " " + label, StringComparison.Ordinal),
+                "Only detailed HTML, not legacy Markdown, should decorate " + label);
+        foreach (var view in new[] { "details", "trends" })
+        {
+            var other = HtmlDetailedReportWriter.Write(snapshot with { Request = snapshot.Request with { View = view } });
+            var otherFields = GitMetadataFields(other);
+            Require(otherFields.Length == fields.Length && otherFields.All(field => field.Icon.Length == 0),
+                "Non-Teams Git views must retain undecorated metadata.");
+        }
+        AssertLinks(html);
+    }
+
+    private static (string Icon, string Label, string Value)[] GitMetadataFields(string html) =>
+        Regex.Matches(html, @"<div class=""report-line"">(?:<span class=""report-icon"" aria-hidden=""true"">([^<]*)</span> )?"
+            + @"<span class=""report-label"">(Commit ID:|Organization:|Repository ID:|Author date:|Committer date:)</span> (.*?)</div>",
+            RegexOptions.Singleline)
+            .Select(field => (Text(field.Groups[1].Value), Text(field.Groups[2].Value), Text(field.Groups[3].Value))).ToArray();
 
     private static void IncidentMemberActivityDetails()
     {

@@ -222,7 +222,7 @@ public static class HtmlSummaryReportWriter
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TableRow(presentation is null ? ReportTables.Cells(row, request, cancellationToken)
-                    : WithFileColumns(presentation.Cells(row, bySource),
+                    : WithFileColumns(presentation.SummaryCells(row, bySource),
                         FileCells(row.FilesAdded, row.FilesModified, row.FilesDeleted), beforeLast: !bySource));
             }
             output.Append("</tbody></table>\n");

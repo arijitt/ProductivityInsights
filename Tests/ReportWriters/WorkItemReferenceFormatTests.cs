@@ -137,6 +137,66 @@ public static class WorkItemReferenceFormatTests
         Require(document.OverallRows.Sum(row => row.WorkItems) == 4 && document.SourceRows.Sum(row => row.WorkItems) == 5
             && document.WorkItems.Sum(item => item.ActiveWorkDays) == 7,
             "Presentation does not replace existing source metrics, durations or record attribution.");
+        foreach (var detailSnapshot in new[] { snapshot, collision, unknown, empty, unsafeSnapshot })
+            VerifyDetailedItems(detailSnapshot);
+        VerifyHistoryIdentities(snapshot);
+        VerifyPersonSummaries(snapshot);
+        var mixedDurations = snapshot with
+        {
+            WorkItems =
+            [
+                Item(41, alex, "Task", @"Project\Root", 1),
+                Item(42, alex, "Task", @"Project\Root", 2),
+                Item(43, alex, "Bug", @"Project\Root", 4),
+                Item(44, alex, "Product Backlog Item", @"Project\Root", 8),
+                Item(45, alex, "Task", @"Project\Root", 1) with { History = [new("New", start, alex), new("Done", start, alex)] },
+                Item(46, alex, "Bug", @"Project\Root", 1) with { History = [new("Active", start, alex)] },
+                Item(47, alex, "Task", @"Project\Root", 1) with { History = [] }
+            ]
+        };
+        var mixedSummary = PersonSummaries(HtmlDetailedReportWriter.Write(mixedDurations))
+            .Single(text => text.Contains("Summary for Alex Example", StringComparison.Ordinal));
+        foreach (var expected in new[]
+        {
+            "Total Work Items Completed: 7", "Task: 4", "Bug: 2", "Product Backlog Item: 1",
+            "Total Days: 15.0", "Maximum Days: 8.0", "Minimum Days: 1.0", "Average Days: 3.8", "Median Days: 3.0",
+            "Work Items with Active Work Time: 4 of 7", "Work Items with Unavailable Active Work Time: 2 of 7"
+        })
+            Require(mixedSummary.Contains(expected, StringComparison.Ordinal),
+                "Person time analysis must use positive per-item durations, exclude unknown/zero values and compute the even median: " + expected);
+        var missingSummary = PersonSummaries(HtmlDetailedReportWriter.Write(unknown))
+            .Single(text => text.Contains("Summary for Unmatched Alias", StringComparison.Ordinal));
+        Require(missingSummary.Contains("No recorded positive active-work duration is available.", StringComparison.Ordinal)
+            && missingSummary.Contains("Work Items with Active Work Time: 0 of 1", StringComparison.Ordinal)
+            && missingSummary.Contains("Work Items with Unavailable Active Work Time: 1 of 1", StringComparison.Ordinal)
+            && !missingSummary.Contains("Total Days:", StringComparison.Ordinal),
+            "Missing history must not become fabricated zero-valued duration statistics.");
+        var detailedText = Text(CompletionSection(HtmlDetailedReportWriter.Write(snapshot)));
+        Require(detailedText.Contains("2026-07-02 00:00:00 - Blair Example", StringComparison.Ordinal)
+            && detailedText.Contains("Active \u2192 Done (spent 1d in 'Active')", StringComparison.Ordinal)
+            && detailedText.Contains("ongoing at report as-of 2026-08-01 00:00:00", StringComparison.Ordinal),
+            "Rich history must preserve the actual transition actor, timestamp, elapsed state duration and fixed as-of boundary.");
+        var missingText = Text(CompletionSection(HtmlDetailedReportWriter.Write(unknown)));
+        Require(missingText.Contains("Last Changed:", StringComparison.Ordinal)
+            && missingText.Contains("Unknown (insufficient state history)", StringComparison.Ordinal)
+            && missingText.Contains("No state history was supplied", StringComparison.Ordinal)
+            && !missingText.Contains("Closed Date:", StringComparison.Ordinal)
+            && !missingText.Contains("Time to Complete:", StringComparison.Ordinal)
+            && !missingText.Contains("Priority:", StringComparison.Ordinal),
+            "Missing closure, priority and history must remain explicit or absent, never fabricated.");
+        var singleRevision = snapshot with { WorkItems = [early with { History = [new("Active", start, alex)] }] };
+        var singleText = Text(CompletionSection(HtmlDetailedReportWriter.Write(singleRevision)));
+        Require(singleText.Contains("Currently in Active since 2026-07-01 00:00:00", StringComparison.Ordinal)
+            && singleText.Contains("Unknown (insufficient state history)", StringComparison.Ordinal),
+            "A singleton history retains its recorded current state without inventing active-work metrics.");
+        var unsafeDetails = CompletionSection(HtmlDetailedReportWriter.Write(unsafeSnapshot));
+        Require(!unsafeDetails.Contains("<img", StringComparison.Ordinal) && !unsafeDetails.Contains("<script", StringComparison.Ordinal)
+            && !unsafeDetails.Contains("href=\"javascript:", StringComparison.Ordinal)
+            && Text(unsafeDetails).Contains("<img src=x> | unsafe", StringComparison.Ordinal)
+            && unsafeDetails.Contains("Unsafe or unsupported URL", StringComparison.Ordinal),
+            "Rich work-item details must encode recorded text and preserve unsafe-link warnings.");
+        Require(!HtmlDetailedReportWriter.Write(standalone).Contains("\U0001F4CB Work Item #", StringComparison.Ordinal),
+            "Non-Teams work item details must retain their original presentation.");
 
         WorkItemReportRecord Item(int id, ReportIdentity actor, string type, string area, int day) => new()
         {
@@ -146,6 +206,150 @@ public static class WorkItemReferenceFormatTests
             History = [new("New", start.AddHours(-1), actor), new("Active", start, actor), new("Done", start.AddDays(day), blair)]
         };
     }
+
+    private static void VerifyPersonSummaries(ReportSnapshot snapshot)
+    {
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var html = HtmlDetailedReportWriter.Write(document);
+        var summaries = PersonSummaries(html);
+        Require(summaries.Length == document.OverallRows.Length,
+            "Every person, including zero-activity members, must have a summary above their work-item details.");
+        var alex = summaries.Single(text => text.Contains("Summary for Alex Example", StringComparison.Ordinal));
+        foreach (var expected in new[]
+        {
+            "Total Work Items Completed: 3", "Bug: 1", "Task: 1", "Feature: 1",
+            "Time Analysis (Committed/Active/In Progress states only):",
+            "Total Days: 6.0", "Maximum Days: 3.0", "Minimum Days: 1.0", "Average Days: 2.0", "Median Days: 2.0",
+            "Work Items with Active Work Time: 3 of 3"
+        })
+            Require(alex.Contains(expected, StringComparison.Ordinal),
+                "Member summaries must use deduplicated items across source groups and preserve odd-median statistics: " + expected);
+        var blair = summaries.Single(text => text.Contains("Summary for Blair Example", StringComparison.Ordinal));
+        Require(blair.Contains("Product Backlog Item: 1", StringComparison.Ordinal)
+            && blair.Contains("Total Days: 1.0", StringComparison.Ordinal)
+            && blair.Contains("Work Items with Active Work Time: 1 of 1", StringComparison.Ordinal),
+            "Different contributors must not share each other's counts or duration totals.");
+        var zero = summaries.Single(text => text.Contains("Summary for Zero Example", StringComparison.Ordinal));
+        Require(zero.Contains("Total Work Items Completed: 0", StringComparison.Ordinal)
+            && zero.Contains("Work Items with Active Work Time: 0 of 0", StringComparison.Ordinal)
+            && zero.Contains("No work items for this contributor.", StringComparison.Ordinal)
+            && !zero.Contains("Total Days:", StringComparison.Ordinal),
+            "Zero members need explicit summaries without invented work or duration values.");
+        Require(!MarkdownReportWriter.Write(document).Contains("Summary for Alex Example", StringComparison.Ordinal)
+            && !HtmlSummaryReportWriter.Write(document, "report_Detailed.html").Contains("Work Items with Active Work Time", StringComparison.Ordinal)
+            && !HtmlDetailedReportWriter.Write(snapshot with { Request = snapshot.Request with { View = "details" } })
+                .Contains("Summary for Alex Example", StringComparison.Ordinal),
+            "New person summaries must be restricted to Teams Work Items detailed HTML.");
+    }
+
+    private static string[] PersonSummaries(string html) =>
+        Regex.Matches(CompletionSection(html),
+            @"<h3\b[^>]*>.*?</h3>\s*<div class=""report-lines"">(.*?)</div>\s*(?=<div class=""report-lines"">|<h3|<h2|$)",
+            RegexOptions.Singleline).Select(summary => Text(summary.Groups[1].Value)).ToArray();
+
+    private static void VerifyDetailedItems(ReportSnapshot snapshot)
+    {
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var summary = HtmlSummaryReportWriter.Write(document, "report_Detailed.html");
+        var markdown = MarkdownReportWriter.Write(document);
+        var html = HtmlDetailedReportWriter.Write(document);
+        var section = CompletionSection(html);
+        var headings = Regex.Matches(section, @"<h4 class=""report-line report-record-heading"">(.*?)</h4>", RegexOptions.Singleline)
+            .Select(heading => Text(heading.Groups[1].Value)).ToArray();
+        Require(headings.Length == document.WorkItems.Length
+            && headings.All(heading => heading.StartsWith("\U0001F4CB Work Item #", StringComparison.Ordinal)),
+            "Every distinct organization-qualified work item must have one rich entry, despite overlapping source selections.");
+        foreach (var (label, icon) in new[]
+        {
+            ("Title:", "\U0001F4DD"), ("State:", "\U0001F504"), ("Assignee:", "\U0001F464"),
+            ("Created Date:", "\U0001F4C5"), ("Time in Active Work:", "\u23F1\uFE0F")
+        })
+        {
+            var fields = Regex.Matches(section, @"<span class=""report-icon"" aria-hidden=""true"">([^<]*)</span> <span class=""report-label"">"
+                + Regex.Escape(label) + "</span>", RegexOptions.Singleline);
+            Require(fields.Count == document.WorkItems.Length && fields.All(field => Text(field.Groups[1].Value) == icon),
+                "Each rich entry must use the matching on-screen field icon: " + label);
+        }
+        var text = Text(section);
+        foreach (var item in document.WorkItems)
+        {
+            var record = item.Entity.Record;
+            Require(text.Contains("Title: " + record.Title, StringComparison.Ordinal)
+                && text.Contains("State: " + record.State, StringComparison.Ordinal)
+                && text.Contains(record.Assignee.DisplayName, StringComparison.Ordinal),
+                "Work-item fields and assignees must remain complete.");
+            var active = item.ActiveWorkDays is { } days
+                ? days.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " days"
+                : "Unknown (insufficient state history)";
+            Require(text.Contains("Time in Active Work: " + active, StringComparison.Ordinal),
+                "Detailed presentation must use the existing active-work calculation.");
+        }
+        Require(html.Contains("All contributor work item details", StringComparison.Ordinal)
+            && (document.WorkItems.IsEmpty || html.Contains("Source-qualified key", StringComparison.Ordinal))
+            && summary == HtmlSummaryReportWriter.Write(document, "report_Detailed.html")
+            && markdown == MarkdownReportWriter.Write(document)
+            && !markdown.Contains("\U0001F4CB Work Item #", StringComparison.Ordinal),
+            "The full audit appendix, summary and legacy Markdown must remain intact.");
+        if (document.WorkItems.Length > 0)
+            Require(section.Contains("State Change History", StringComparison.Ordinal),
+                "Member details must include the work-item history before the summaries, not only in the appendix.");
+        using var output = new StringWriter();
+        HtmlDetailedReportWriter.WriteTo(document, output);
+        Require(output.ToString() == html, "Streamed detailed downloads must preserve every rich entry.");
+    }
+
+    private static void VerifyHistoryIdentities(ReportSnapshot baseline)
+    {
+        static ReportIdentity WithPrincipal(ReportIdentity identity) =>
+            identity with { PrincipalName = "principal-" + identity.Email };
+        var snapshot = baseline with
+        {
+            Request = baseline.Request with { Roster = baseline.Request.Roster.Select(WithPrincipal).ToImmutableArray() },
+            WorkItems = baseline.WorkItems.Select(item => item with
+            {
+                Assignee = WithPrincipal(item.Assignee),
+                History = item.History.Select(revision => revision with { Actor = WithPrincipal(revision.Actor) }).ToImmutableArray()
+            }).ToImmutableArray()
+        };
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var summary = HtmlSummaryReportWriter.Write(document, "report_Detailed.html");
+        var html = HtmlDetailedReportWriter.Write(document);
+        var histories = HistorySections(html);
+        Require(histories.Length == document.WorkItems.Length * 2
+            && histories.All(history => !history.Contains("principal:", StringComparison.Ordinal)
+                && !history.Contains("ID:", StringComparison.Ordinal)),
+            "Both the member timelines and appendix history tables must omit Principal and ID annotations.");
+        foreach (var actor in document.WorkItems.SelectMany(item => item.Periods.Select(period => period.Actor)).Distinct())
+            Require(histories.Any(history => history.Contains(actor.Name, StringComparison.Ordinal)
+                && history.Contains("email: " + actor.Email, StringComparison.Ordinal)),
+                "History must preserve each actor's recorded name and email, including the transition and current-state actors.");
+        Require(Text(html).Contains("principal: principal-alex@example.test", StringComparison.Ordinal)
+            && Text(html).Contains("ID: alex", StringComparison.Ordinal)
+            && summary == HtmlSummaryReportWriter.Write(document, "report_Detailed.html"),
+            "Identity details outside history and summary HTML must remain unchanged.");
+        var other = HtmlDetailedReportWriter.Write(snapshot with { Request = snapshot.Request with { View = "details" } });
+        Require(HistorySections(other).All(history => history.Contains("principal:", StringComparison.Ordinal)
+                && history.Contains("ID:", StringComparison.Ordinal))
+            && MarkdownReportWriter.Write(document).Contains("principal: principal-alex@example.test; ID: alex", StringComparison.Ordinal),
+            "Non-Teams history and legacy Markdown must keep their existing full identity format.");
+        Require(document.WorkItems.SelectMany(item => item.Periods).All(period => period.Actor.PrincipalName is not null && period.Actor.Id is not null),
+            "Presentation must not remove identity metadata from captured records.");
+
+        static string[] HistorySections(string content) =>
+            Regex.Matches(content, @"<h5\b[^>]*>(.*?)</h5>(.*?)(?=<h[1-6]\b|$)", RegexOptions.Singleline)
+                .Where(section => Text(section.Groups[1].Value).EndsWith("State Change History", StringComparison.OrdinalIgnoreCase))
+                .Select(section => Text(section.Groups[2].Value)).ToArray();
+    }
+
+    private static string CompletionSection(string html)
+    {
+        var start = html.IndexOf("TEAM WORK ITEM COMPLETION DETAILS BY PERSON", StringComparison.Ordinal);
+        var end = html.IndexOf("TEAM WORK ITEM SUMMARY BY AREA PATH", StringComparison.Ordinal);
+        Require(start >= 0 && end > start, "Work-item completion details must retain their original report section.");
+        return html[start..end];
+    }
+
+    private static string Text(string html) => WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]*>", ""));
 
     private static string[][][] Bodies(string html) => Regex.Matches(html, @"<tbody>(.*?)</tbody>", RegexOptions.Singleline)
         .Select(body => Regex.Matches(body.Groups[1].Value, @"<tr>(.*?)</tr>", RegexOptions.Singleline)

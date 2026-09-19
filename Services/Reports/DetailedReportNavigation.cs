@@ -17,6 +17,7 @@ internal sealed class DetailedReportNavigation
     private readonly Dictionary<string, string> teamSources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> destinations = new(StringComparer.Ordinal);
     private readonly List<(int Position, string Id)> targets = [];
+    private int? rosterHierarchyPosition;
 
     internal DetailedReportNavigation(ReportDocument document, CancellationToken token)
     {
@@ -42,6 +43,7 @@ internal sealed class DetailedReportNavigation
     }
 
     internal string MemberLink(ReportIdentity member) => memberReferences[identities.Get(member).Key];
+    internal void RosterHierarchy(int position) => rosterHierarchyPosition = position;
     internal string? SourceLink(string? key) => key is null ? null : sourceReferences.GetValueOrDefault(key);
 
     internal string? PathLink(string path, IEnumerable<string>? sourceKeys = null)
@@ -101,6 +103,12 @@ internal sealed class DetailedReportNavigation
                 blocks.Add(block);
         }
         blocks.Sort((left, right) => left.Span.Start.CompareTo(right.Span.Start));
+        if (rosterHierarchyPosition is { } position)
+        {
+            var roster = blocks.OfType<ParagraphBlock>().SingleOrDefault(block => block.Span.Start == position)
+                ?? throw new InvalidOperationException("The detailed report could not locate its captured roster hierarchy.");
+            roster.SetData(DetailedReportPresentation.RosterHierarchyKey, request.RosterParentIndices);
+        }
         var index = 0;
         foreach (var target in targets)
         {

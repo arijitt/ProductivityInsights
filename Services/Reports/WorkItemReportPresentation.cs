@@ -101,6 +101,7 @@ internal sealed class WorkItemReportPresentation
     public ImmutableArray<ReportSummaryRow> OverallRows { get; }
     public ImmutableArray<AreaRow> AreaRows { get; }
     public string Contributor(ReportSummaryRow row) => contributorNames[row.ContributorKey];
+    public IEnumerable<WorkItemDocument> Items(ReportSummaryRow member) => itemsByContributor[member.ContributorKey];
 
     public static string[] Headers(bool byArea) => byArea
         ? ["\U0001F464 Team Member", "\U0001F4C2 Area Path", "\U0001F4CB Total Items", "\U0001F41E Bugs",
@@ -123,7 +124,7 @@ internal sealed class WorkItemReportPresentation
 
     public IEnumerable<SourceGroup> Groups(ReportSummaryRow member)
     {
-        var groups = itemsByContributor[member.ContributorKey].GroupBy(item =>
+        var groups = Items(member).GroupBy(item =>
             ReportFormatting.Join(",", item.Entity.SourceKeys.Select(key => ReportFormatting.Number(sourceOrder[key])), token),
             StringComparer.Ordinal);
         foreach (var group in groups.OrderBy(group => group.First().Entity.SourceKeys.Min(key => sourceOrder[key]))

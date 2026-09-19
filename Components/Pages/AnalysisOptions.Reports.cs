@@ -158,14 +158,28 @@ public partial class AnalysisOptions
         }
 
         var roster = ImmutableArray.CreateBuilder<ReportIdentity>();
-        void AddMember(OrgMember node)
-        {
-            roster.Add(new ReportIdentity(node.DisplayName ?? "", node.Mail, node.Id, node.UserPrincipalName));
-            foreach (var child in node.Reports)
-                AddMember(child);
-        }
+        var rosterParents = ImmutableArray.CreateBuilder<int?>();
         if (selectedView == "teams" && orgTreeRoot is not null)
-            AddMember(orgTreeRoot);
+        {
+            var pending = new Stack<(OrgMember Node, int? Parent, int Depth)>();
+            var visited = new HashSet<OrgMember>(ReferenceEqualityComparer.Instance);
+            pending.Push((orgTreeRoot, null, 0));
+            while (pending.TryPop(out var entry))
+            {
+                reportLifetime.Token.ThrowIfCancellationRequested();
+                if (!visited.Add(entry.Node))
+                    throw new InvalidOperationException("The displayed reporting hierarchy contains a repeated node or cycle.");
+                if (roster.Count >= ReportRenderingLimits.MaximumIdentities
+                    || entry.Depth > ReportRenderingLimits.MaximumRosterDepth
+                    || (long)roster.Count + pending.Count + entry.Node.Reports.Count + 1 > ReportRenderingLimits.MaximumIdentities)
+                    throw new ReportSizeLimitException("The displayed reporting hierarchy exceeds the export identity/depth limits. No members were omitted.");
+                var index = roster.Count;
+                roster.Add(new ReportIdentity(entry.Node.DisplayName ?? "", entry.Node.Mail, entry.Node.Id, entry.Node.UserPrincipalName));
+                rosterParents.Add(entry.Parent);
+                for (var child = entry.Node.Reports.Count - 1; child >= 0; child--)
+                    pending.Push((entry.Node.Reports[child], index, entry.Depth + 1));
+            }
+        }
 
         var start = startDateTime ?? (selectedOption == "incidentManagement" ? DateTime.UnixEpoch : now.UtcDateTime.AddDays(-30));
         var end = endDateTime ?? now.UtcDateTime;
@@ -210,6 +224,7 @@ public partial class AnalysisOptions
             EffectiveBoundsOrigin = boundsOrigin,
             Sources = sources.ToImmutable(),
             Roster = roster.ToImmutable(),
+            RosterParentIndices = selectedOption is "incidentManagement" or "gitCommits" or "workItems" ? rosterParents.ToImmutable() : [],
             Manager = selectedView == "teams" ? selectedManager?.displayName : null,
             TrendPeriod = selectedTrendPeriod
         };

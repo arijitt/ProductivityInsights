@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using Markdig.Extensions.Tables;
@@ -11,10 +12,12 @@ namespace ProductivityInsights.Services.Reports;
 
 internal static class DetailedReportPresentation
 {
-    internal static void Configure(HtmlRenderer renderer, string markdown, CancellationToken token)
+    internal static readonly object RosterHierarchyKey = new();
+
+    internal static void Configure(HtmlRenderer renderer, string markdown, CancellationToken token, bool workItemDetails)
     {
-        renderer.ObjectRenderers.Insert(0, new ReportParagraphRenderer(markdown, token));
-        renderer.ObjectRenderers.Insert(0, new ReportLiteralRenderer());
+        renderer.ObjectRenderers.Insert(0, new ReportParagraphRenderer(markdown, token, workItemDetails));
+        renderer.ObjectRenderers.Insert(0, new ReportLiteralRenderer(workItemDetails));
         renderer.ObjectRenderers.Insert(0, new ReportTableRenderer());
     }
 
@@ -28,7 +31,7 @@ internal static class DetailedReportPresentation
         }
     }
 
-    private sealed class ReportParagraphRenderer(string markdown, CancellationToken token) : ParagraphRenderer
+    private sealed class ReportParagraphRenderer(string markdown, CancellationToken token, bool workItemDetails) : ParagraphRenderer
     {
         protected override void Write(HtmlRenderer renderer, ParagraphBlock paragraph)
         {
@@ -46,10 +49,16 @@ internal static class DetailedReportPresentation
                 else lines[^1].Add(inline);
             }
             while (lines.Count > 0 && lines[^1].Count == 0) lines.RemoveAt(lines.Count - 1);
+            if (paragraph.GetData(RosterHierarchyKey) is ImmutableArray<int?> parents)
+            {
+                WriteRosterHierarchy(renderer, lines, parents);
+                return;
+            }
             if (lines.Count >= 3 && IsRule(lines[0], '\u2550') && IsRule(lines[^1], '\u2550'))
             {
                 var heading = PlainText(lines[1]).TrimStart();
                 var person = heading.StartsWith("\U0001F464", StringComparison.Ordinal)
+                    || heading.StartsWith(GitReportPresentation.CommitterIcon, StringComparison.Ordinal)
                     || heading.StartsWith("\U0001F4E6", StringComparison.Ordinal);
                 var tag = person ? "h3" : "h2";
                 renderer.Write("<" + tag);
@@ -70,18 +79,67 @@ internal static class DetailedReportPresentation
             }
             renderer.WriteLine("<div class=\"report-lines\">");
             foreach (var line in lines)
+                WriteReportLine(renderer, line);
+            renderer.WriteLine("</div>");
+        }
+
+        private void WriteReportLine(HtmlRenderer renderer, List<Inline> line)
+        {
+            token.ThrowIfCancellationRequested();
+            if (IsRule(line, '\u2500'))
+            {
+                renderer.WriteLine("<hr class=\"report-rule\" />");
+                return;
+            }
+            var modifier = LineClass(PlainText(line).TrimStart());
+            var tag = modifier == "report-record-heading" ? "h4" : "div";
+            renderer.Write("<" + tag + " class=\"report-line" + (modifier is null ? "" : " " + modifier) + "\">");
+            WriteLine(renderer, line);
+            renderer.WriteLine("</" + tag + ">");
+        }
+
+        private void WriteRosterHierarchy(HtmlRenderer renderer, List<List<Inline>> lines, ImmutableArray<int?> parents)
+        {
+            if (parents.IsEmpty || lines.Count < parents.Length + 2 || !IsRule(lines[parents.Length + 1], '\u2500'))
+                throw new InvalidOperationException("The detailed roster hierarchy could not preserve every captured member.");
+            renderer.WriteLine("<div class=\"report-lines\">");
+            renderer.Write("<div class=\"report-line\">");
+            WriteLine(renderer, lines[0]);
+            renderer.WriteLine("</div>");
+            renderer.WriteLine("<ul class=\"report-roster-hierarchy\" aria-label=\"Captured reporting hierarchy\" style=\"list-style:none;padding-left:0;max-width:100%;overflow-x:auto;\">");
+            var depths = new int[parents.Length];
+            var previousDepth = 0;
+            for (var index = 0; index < parents.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
-                if (IsRule(line, '\u2500'))
+                var line = lines[index + 1];
+                if (line.Count != 1 || line[0] is not LinkInline)
+                    throw new InvalidOperationException("A captured roster member is missing its detail hyperlink.");
+                var depth = parents[index] is { } parent ? depths[parent] + 1 : 0;
+                depths[index] = depth;
+                if (index > 0)
                 {
-                    renderer.WriteLine("<hr class=\"report-rule\" />");
-                    continue;
+                    if (depth > previousDepth)
+                        renderer.WriteLine("<ul style=\"list-style:none;border-left:1px solid var(--border);margin:4px 0 4px 8px;padding-left:18px;\">");
+                    else
+                    {
+                        renderer.WriteLine("</li>");
+                        for (var level = previousDepth; level > depth; level--) renderer.WriteLine("</ul></li>");
+                    }
                 }
-                var modifier = LineClass(PlainText(line).TrimStart());
-                var tag = modifier == "report-record-heading" ? "h4" : "div";
-                renderer.Write("<" + tag + " class=\"report-line" + (modifier is null ? "" : " " + modifier) + "\">");
+                renderer.Write("<li><span class=\"report-line report-roster-member\">");
                 WriteLine(renderer, line);
-                renderer.WriteLine("</" + tag + ">");
+                renderer.WriteLine("</span>");
+                previousDepth = depth;
+            }
+            renderer.WriteLine("</li>");
+            for (var level = previousDepth; level > 0; level--) renderer.WriteLine("</ul></li>");
+            renderer.Write("</ul><hr class=\"report-rule\" />");
+            if (lines.Count > parents.Length + 2)
+            {
+                renderer.WriteLine();
+                for (var index = parents.Length + 2; index < lines.Count; index++)
+                    WriteReportLine(renderer, lines[index]);
             }
             renderer.WriteLine("</div>");
         }
@@ -98,12 +156,14 @@ internal static class DetailedReportPresentation
                 && (end == markdown.Length || markdown[end] is '\r' or '\n');
         }
 
-        private static string? LineClass(string text) =>
+        private string? LineClass(string text) =>
             text.StartsWith("\U0001F504 Commit:", StringComparison.Ordinal) || text.StartsWith("Incident Details:", StringComparison.Ordinal)
+                || workItemDetails && text.StartsWith("\U0001F4CB Work Item #", StringComparison.Ordinal)
                 ? "report-record-heading"
             : text.StartsWith("\U0001F4C4 ", StringComparison.Ordinal) ? "report-file"
             : text.StartsWith("\U0001F4E6 ", StringComparison.Ordinal) || text.StartsWith("\U0001F4CA ", StringComparison.Ordinal)
-                || text.StartsWith("\U0001F4C1 ", StringComparison.Ordinal) ? "report-subheading"
+                || text.StartsWith("\U0001F4C1 ", StringComparison.Ordinal)
+                || workItemDetails && text.StartsWith("\u23F1\uFE0F Time Analysis", StringComparison.Ordinal) ? "report-subheading"
             : text.StartsWith("\u2022 [", StringComparison.Ordinal) ? "report-work-item"
             : text.StartsWith("\u2022 ", StringComparison.Ordinal) ? "report-roster-member"
             : null;
@@ -129,8 +189,14 @@ internal static class DetailedReportPresentation
         }
     }
 
-    private sealed class ReportLiteralRenderer : LiteralInlineRenderer
+    private sealed class ReportLiteralRenderer(bool workItemDetails) : LiteralInlineRenderer
     {
+        private static readonly HashSet<string> WorkItemLabels = new(StringComparer.Ordinal)
+        {
+            "State:", "Assignee:", "Priority:", "Created Date:", "Closed Date:", "Time to Complete:",
+            "Last Changed:", "Area Path:", "Iteration:", "Time in Active Work:"
+        };
+
         private static readonly HashSet<string> Labels = new(StringComparer.Ordinal)
         {
             "Author:", "Committer:", "Date:", "Message:", "Commit ID:", "Organization:", "Repository ID:",
@@ -166,7 +232,9 @@ internal static class DetailedReportPresentation
             var remainder = text[start..];
             var labelStart = remainder.Length - remainder.TrimStart().Length;
             var colon = remainder.IndexOf(':', labelStart);
-            if (colon >= labelStart && colon - labelStart < 40 && Labels.Contains(remainder[labelStart..(colon + 1)]))
+            if (colon >= labelStart && colon - labelStart < 40
+                && (Labels.Contains(remainder[labelStart..(colon + 1)])
+                    || workItemDetails && hasIcon && WorkItemLabels.Contains(remainder[labelStart..(colon + 1)])))
             {
                 var label = remainder[labelStart..(colon + 1)];
                 var icon = label switch

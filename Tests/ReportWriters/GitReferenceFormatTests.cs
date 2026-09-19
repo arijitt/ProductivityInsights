@@ -193,7 +193,8 @@ public static class GitReferenceFormatTests
             Counts(source.Single(row => row[0] == "More Commits" && row[1] == "org/project/beta"), 6, "1", "0", "0");
             Counts(source.Single(row => row[0] == "More Commits" && row[1] == "other/project/alpha"), 6, "0", "0", "1");
             Counts(overall.Single(row => row[0] == "More Commits"), 5, "4", "9", "3");
-            Counts(overall.Single(row => row[0].StartsWith("Author:", StringComparison.Ordinal)), 5, "0", "1", "0");
+            Counts(overall.Single(row => row[0].StartsWith(view == "teams" ? "\U0001F464 " : "Author:", StringComparison.Ordinal)),
+                5, "0", "1", "0");
             Counts(overall.Single(row => row[0] == "Higher PRs"), 5, "0", "0", "0");
             if (view == "teams")
                 Counts(overall.Single(row => row[0] == "Zero Member"), 5, "0", "0", "0");

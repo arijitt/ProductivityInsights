@@ -1,5 +1,5 @@
 param(
-    [string[]] $Fixtures = @('gitCommits', 'workItems', 'incidentManagement', 'large', 'failed-export', 'slow-export', 'skipped-export', 'picker-stale', 'stale-module', 'incident-available-export', 'incident-unkeyed-export'),
+    [string[]] $Fixtures = @('gitCommits', 'git-role-icons', 'workItems', 'incidentManagement', 'large', 'failed-export', 'slow-export', 'skipped-export', 'picker-stale', 'stale-module', 'incident-available-export', 'incident-unkeyed-export'),
     [ValidateRange(1024, 65535)] [int] $Port = 5187,
     [switch] $NoBuild
 )
