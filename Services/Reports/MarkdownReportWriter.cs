@@ -158,6 +158,7 @@ public static class MarkdownReportWriter
             foreach (var member in document.OverallRows)
             {
                 token.ThrowIfCancellationRequested();
+                var sectionStart = output.Length;
                 navigation?.MemberSection(output.Length, member.ContributorKey);
                 Heading(3, member.Contributor);
                 var items = groups[member.ContributorKey].ToImmutableArray();
@@ -165,6 +166,7 @@ public static class MarkdownReportWriter
                 foreach (var item in items)
                 {
                     token.ThrowIfCancellationRequested();
+                    var itemStart = output.Length;
                     var record = item.Entity.Record;
                     Heading(4, $"Work item {record.Organization}:{record.Id} - {record.Title}");
                     Field("Source-qualified key", record.EntityKey);
@@ -211,7 +213,9 @@ public static class MarkdownReportWriter
                         output.Append("\n");
                     }
                     Link(record.Url, "View Work Item", linkRecordedUrl: navigation is not null && Request.IsTeams);
+                    navigation?.ItemSection(itemStart, output.Length);
                 }
+                navigation?.PersonSection(sectionStart, output.Length);
             }
         }
 
@@ -254,6 +258,7 @@ public static class MarkdownReportWriter
                 .ThenBy(presentation.Contributor, StringComparer.Ordinal))
             {
                 token.ThrowIfCancellationRequested();
+                var sectionStart = output.Length;
                 var role = member.Contributor.StartsWith("Author:", StringComparison.Ordinal) ? "Contributor" : "Committer";
                 var roleIcon = navigation is not null && Request.IsTeams && role == "Committer"
                     ? GitReportPresentation.CommitterIcon : GitReportPresentation.AuthorIcon;
@@ -273,7 +278,7 @@ public static class MarkdownReportWriter
                         token.ThrowIfCancellationRequested();
                         var record = commit.Entity.Record;
                         Rule();
-                        Line($"\U0001F504 Commit: {record.Id[..Math.Min(8, record.Id.Length)]}...");
+                        var itemStart = ItemHeading($"\U0001F504 Commit: {record.Id[..Math.Min(8, record.Id.Length)]}...");
                         Line("Author: " + GitReportPresentation.Identity(record.Author));
                         Line((navigation is not null && Request.IsTeams ? GitReportPresentation.CommitterIcon + " " : "")
                             + "Committer: " + GitReportPresentation.Identity(record.Committer));
@@ -299,8 +304,11 @@ public static class MarkdownReportWriter
                         GitDetailField("\U0001F4C5", "Committer date", ReportFormatting.Date(record.CommitterDate));
                         Link(record.Url, "\U0001F310 URL", linkRecordedUrl: navigation is not null && Request.IsTeams);
                         Rule();
+                        if (navigation is not null && Request.IsTeams) output.Append("\n");
+                        navigation?.ItemSection(itemStart, output.Length);
                     }
                 }
+                navigation?.PersonSection(sectionStart, output.Length);
             }
         }
 
@@ -338,6 +346,7 @@ public static class MarkdownReportWriter
             foreach (var member in presentation.OverallRows.Where(row => navigation is not null || row.WorkItems != 0))
             {
                 token.ThrowIfCancellationRequested();
+                var sectionStart = output.Length;
                 navigation?.MemberSection(output.Length, member.ContributorKey);
                 var contributor = member.WorkItems == 0 ? member.Contributor : presentation.Contributor(member);
                 BoxHeading($"\U0001F464 {contributor}: {ReportFormatting.Number(member.WorkItems)} work item(s) completed");
@@ -374,6 +383,7 @@ public static class MarkdownReportWriter
                             }
                     }
                 }
+                navigation?.PersonSection(sectionStart, output.Length);
             }
             Rule();
             if (document.WorkItems.IsEmpty) Paragraph("No work items in the completed snapshot.");
@@ -410,7 +420,7 @@ public static class MarkdownReportWriter
         private void TeamWorkItemRecordDetails(WorkItemDocument item)
         {
             var record = item.Entity.Record;
-            Line($"\U0001F4CB Work Item #{ReportFormatting.Number(record.Id)} - {record.Type}");
+            var itemStart = ItemHeading($"\U0001F4CB Work Item #{ReportFormatting.Number(record.Id)} - {record.Type}");
             Line("\U0001F4DD Title: " + record.Title);
             Line("\U0001F504 State: " + record.State);
             Line("\U0001F464 Assignee: " + ReportFormatting.Identity(record.Assignee));
@@ -447,6 +457,21 @@ public static class MarkdownReportWriter
                         Line($"\U0001F552 Currently in {period.State} since {ReportFormatting.CompactTimestamp(period.EnteredAt)}; entered by {WorkItemHistoryActor(period.Actor)} ({duration}; ongoing at report as-of {ReportFormatting.CompactTimestamp(document.Snapshot.AsOf)}).");
                 }
             Link(record.Url, "\U0001F310 View Work Item", linkRecordedUrl: true);
+            navigation?.ItemSection(itemStart, output.Length);
+        }
+
+        private int ItemHeading(string text)
+        {
+            var folding = navigation is not null && Request.IsTeams;
+            if (folding) output.Append("\n");
+            var start = output.Length;
+            if (folding)
+            {
+                output.Markdown(text, table: true);
+                output.Append("  \n\n");
+            }
+            else Line(text);
+            return start;
         }
 
         private void TeamWorkItemSummary(WorkItemReportPresentation presentation, bool byArea)
@@ -634,6 +659,7 @@ public static class MarkdownReportWriter
             {
                 var group = document.IncidentGroups[groupIndex];
                 token.ThrowIfCancellationRequested();
+                var sectionStart = output.Length;
                 string? memberKey = null;
                 if (groupIndex != 0 && !group.Incidents.IsEmpty)
                 {
@@ -655,18 +681,22 @@ public static class MarkdownReportWriter
                 if (group.Incidents.IsEmpty) Paragraph("0 incidents in this group.");
                 foreach (var incident in group.Incidents)
                 {
+                    var itemStart = output.Length;
                     Incident(incident);
+                    if (groupIndex != 0) navigation?.ItemSection(itemStart, output.Length);
                     rendered.Add(incident.Entity.Record.EntityKey);
                 }
                 if (memberDetails is not null && memberKey is not null
                     && memberDetails.TryGetValue(memberKey, out var details) && expandedMembers.Add(memberKey))
                     MemberIncidentActivity(details);
+                if (groupIndex != 0) navigation?.PersonSection(sectionStart, output.Length);
             }
             foreach (var member in document.OverallRows.Where(member =>
                 memberDetails is not null ? !expandedMembers.Contains(member.ContributorKey)
                     : !document.IncidentGroups.Any(group => group.Contributor == member.Contributor)))
             {
                 token.ThrowIfCancellationRequested();
+                var sectionStart = output.Length;
                 navigation?.MemberSection(output.Length, member.ContributorKey);
                 Heading(3, member.Contributor);
                 Header("Active", "Created", "Mitigated", "Resolved", "Contributed");
@@ -675,6 +705,7 @@ public static class MarkdownReportWriter
                 output.Append("\n");
                 Paragraph("This contributor has no separate closed-incident detail group. Active, created-only, and action-only incidents and evidence remain fully included.");
                 if (memberDetails is not null) MemberIncidentActivity(memberDetails[member.ContributorKey]);
+                navigation?.PersonSection(sectionStart, output.Length);
             }
             var other = document.Incidents.Where(item => !rendered.Contains(item.Entity.Record.EntityKey)).ToImmutableArray();
             if (!other.IsEmpty)
@@ -702,15 +733,22 @@ public static class MarkdownReportWriter
             Heading(4, $"Created ICMs ({ReportFormatting.Number(details.Created.Length)})");
             Paragraph("Created credits the current owner of incidents created in the selected period, not their original creator.");
             if (details.Created.IsEmpty) Paragraph("No Created incidents for this member in the collected snapshot.");
-            foreach (var incident in details.Created) Incident(incident, headingLevel: 5);
+            foreach (var incident in details.Created)
+            {
+                var itemStart = output.Length;
+                Incident(incident, headingLevel: 5);
+                navigation?.ItemSection(itemStart, output.Length);
+            }
             Heading(4, $"Contributed ICMs ({ReportFormatting.Number(details.Contributed.Length)})");
             Paragraph("Contributed counts distinct incidents with this member's recorded in-period actions. Only this member's actions appear below; repeated actions or source memberships do not add incidents.");
             if (details.Contributed.IsEmpty) Paragraph("No Contributed incidents for this member in the collected snapshot.");
             foreach (var contribution in details.Contributed)
             {
+                var itemStart = output.Length;
                 Incident(contribution.Incident, headingLevel: 5);
                 Heading(6, "Recorded in-period actions by this member");
                 IncidentActionTable(contribution.Actions);
+                navigation?.ItemSection(itemStart, output.Length);
             }
         }
 
@@ -943,9 +981,11 @@ public static class MarkdownReportWriter
         {
             foreach (var member in navigation!.UnlinkedMembers())
             {
+                var sectionStart = output.Length;
                 navigation.MemberSection(output.Length, actors: [member]);
                 Heading(3, "\U0001F464 " + ReportFormatting.Identity(member));
                 Paragraph("No collected detail section is attributed to this roster member. Skipped or unavailable source data is not evidence of zero activity.");
+                navigation.PersonSection(sectionStart, output.Length);
             }
             foreach (var source in navigation.UnlinkedSources())
             {

@@ -13,12 +13,44 @@ namespace ProductivityInsights.Services.Reports;
 internal static class DetailedReportPresentation
 {
     internal static readonly object RosterHierarchyKey = new();
+    internal static readonly object PersonSectionStartKey = new();
+    internal static readonly object PersonSectionEndKey = new();
+    internal static readonly object ItemSectionStartKey = new();
+    internal static readonly object ItemSectionEndKey = new();
+    internal static readonly object ItemFieldsKey = new();
 
     internal static void Configure(HtmlRenderer renderer, string markdown, CancellationToken token, bool workItemDetails)
     {
+        renderer.ObjectRenderers.Insert(0, new ReportDocumentRenderer(token));
         renderer.ObjectRenderers.Insert(0, new ReportParagraphRenderer(markdown, token, workItemDetails));
         renderer.ObjectRenderers.Insert(0, new ReportLiteralRenderer(workItemDetails));
         renderer.ObjectRenderers.Insert(0, new ReportTableRenderer());
+    }
+
+    private sealed class ReportDocumentRenderer(CancellationToken token) : HtmlObjectRenderer<MarkdownDocument>
+    {
+        protected override void Write(HtmlRenderer renderer, MarkdownDocument document)
+        {
+            foreach (var block in document)
+            {
+                token.ThrowIfCancellationRequested();
+                var kind = block.GetData(PersonSectionStartKey) is true ? "person"
+                    : block.GetData(ItemSectionStartKey) is true ? "item" : null;
+                if (kind is not null)
+                {
+                    renderer.WriteLine("<details class=\"report-" + kind + "-details\">");
+                    renderer.WriteLine("<summary>");
+                    renderer.Write(block);
+                    renderer.WriteLine("</summary>");
+                    renderer.WriteLine("<div class=\"report-" + kind + "-content\">");
+                }
+                else renderer.Write(block);
+                if (block.GetData(ItemSectionEndKey) is true)
+                    renderer.WriteLine("</div></details>");
+                if (block.GetData(PersonSectionEndKey) is true)
+                    renderer.WriteLine("</div></details>");
+            }
+        }
     }
 
     private sealed class ReportTableRenderer : HtmlTableRenderer
@@ -49,6 +81,13 @@ internal static class DetailedReportPresentation
                 else lines[^1].Add(inline);
             }
             while (lines.Count > 0 && lines[^1].Count == 0) lines.RemoveAt(lines.Count - 1);
+            if (paragraph.GetData(ItemSectionStartKey) is true)
+            {
+                if (lines.Count != 1 || LineClass(PlainText(lines[0]).TrimStart()) != "report-record-heading")
+                    throw new InvalidOperationException("The detailed report could not isolate an item's folding heading.");
+                WriteReportLine(renderer, lines[0]);
+                return;
+            }
             if (paragraph.GetData(RosterHierarchyKey) is ImmutableArray<int?> parents)
             {
                 WriteRosterHierarchy(renderer, lines, parents);
@@ -72,7 +111,8 @@ internal static class DetailedReportPresentation
                 renderer.WriteLine("</" + tag + ">");
                 return;
             }
-            if (!lines.Any(line => IsRule(line, '\u2500') || LineClass(PlainText(line).TrimStart()) is not null))
+            if (paragraph.GetData(ItemFieldsKey) is not true
+                && !lines.Any(line => IsRule(line, '\u2500') || LineClass(PlainText(line).TrimStart()) is not null))
             {
                 base.Write(renderer, paragraph);
                 return;

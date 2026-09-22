@@ -108,6 +108,24 @@ public static class HtmlDetailedReportWriter
             @page { margin:16mm; }
             @media print { :root { color-scheme:light; --ink:#24344d; --accent:#075fc7; --border:#dce5f0; --muted:#52627a; --surface:#fff; --panel:#f8fafc; --heading:#0d1b3f; --heading-start:#edf4ff; --heading-end:#f4f1ff; --hover:#eff5ff; } body { padding:0; background:white; color:#111; font-size:10pt; } main { max-width:none; padding:0; border:0; border-radius:0; box-shadow:none; } h1 { font-size:21pt; } :target { outline:none; } .report-table-scroll { overflow:visible; } table { font-size:8.5pt; } th,td { padding:6px; } thead { display:table-header-group; } tr { break-inside:avoid; } a { color:#111; text-decoration:underline; } }
             """);
+        if (document.Snapshot.Request.IsTeams)
+            output.Append("""
+
+                .report-person-details { margin:26px 0 12px; }
+                .report-item-details { margin:16px 0; }
+                :is(.report-person-details,.report-item-details) > summary { display:flex; align-items:baseline; gap:10px; cursor:pointer; list-style:none; }
+                :is(.report-person-details,.report-item-details) > summary::-webkit-details-marker { display:none; }
+                :is(.report-person-details,.report-item-details) > summary::before { content:'\25B6'; color:var(--accent); flex:none; }
+                :is(.report-person-details,.report-item-details)[open] > summary::before { transform:rotate(90deg); }
+                :is(.report-person-details,.report-item-details) > summary > :is(h3,h4,h5) { flex:1; min-width:0; margin:0; }
+                :is(.report-person-details,.report-item-details) > summary:focus-visible { outline:3px solid #8bbdff; outline-offset:3px; }
+                @media print {
+                    :is(.report-person-details,.report-item-details)::details-content { display:block; content-visibility:visible; }
+                    .report-person-content,.report-item-content { display:block !important; }
+                    :is(.report-person-details,.report-item-details) > summary { display:block; }
+                    :is(.report-person-details,.report-item-details) > summary::before { display:none; }
+                }
+                """);
         output.Append("\n</style>\n</head>\n<body>\n<main>\n");
         using var writer = new BoundedWriter(output);
         var renderer = new HtmlRenderer(writer);

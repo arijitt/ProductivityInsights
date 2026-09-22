@@ -244,7 +244,7 @@ public static class WorkItemReferenceFormatTests
 
     private static string[] PersonSummaries(string html) =>
         Regex.Matches(CompletionSection(html),
-            @"<h3\b[^>]*>.*?</h3>\s*<div class=""report-lines"">(.*?)</div>\s*(?=<div class=""report-lines"">|<h3|<h2|$)",
+            @"<h3\b[^>]*>.*?</h3>\s*</summary>\s*<div class=""report-person-content"">\s*<div class=""report-lines"">(.*?)</div>\s*(?=<div class=""report-lines"">|</div></details>)",
             RegexOptions.Singleline).Select(summary => Text(summary.Groups[1].Value)).ToArray();
 
     private static void VerifyDetailedItems(ReportSnapshot snapshot)

@@ -17,6 +17,8 @@ internal sealed class DetailedReportNavigation
     private readonly Dictionary<string, string> teamSources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> destinations = new(StringComparer.Ordinal);
     private readonly List<(int Position, string Id)> targets = [];
+    private readonly List<(int Start, int End)> personSections = [];
+    private readonly List<(int Start, int End)> itemSections = [];
     private int? rosterHierarchyPosition;
 
     internal DetailedReportNavigation(ReportDocument document, CancellationToken token)
@@ -44,6 +46,14 @@ internal sealed class DetailedReportNavigation
 
     internal string MemberLink(ReportIdentity member) => memberReferences[identities.Get(member).Key];
     internal void RosterHierarchy(int position) => rosterHierarchyPosition = position;
+    internal void PersonSection(int start, int end)
+    {
+        if (request.IsTeams) personSections.Add((start, end));
+    }
+    internal void ItemSection(int start, int end)
+    {
+        if (request.IsTeams) itemSections.Add((start, end));
+    }
     internal string? SourceLink(string? key) => key is null ? null : sourceReferences.GetValueOrDefault(key);
 
     internal string? PathLink(string path, IEnumerable<string>? sourceKeys = null)
@@ -103,6 +113,8 @@ internal sealed class DetailedReportNavigation
                 blocks.Add(block);
         }
         blocks.Sort((left, right) => left.Span.Start.CompareTo(right.Span.Start));
+        ApplySections(body, personSections, person: true);
+        ApplySections(body, itemSections, person: false);
         if (rosterHierarchyPosition is { } position)
         {
             var roster = blocks.OfType<ParagraphBlock>().SingleOrDefault(block => block.Span.Start == position)
@@ -131,6 +143,29 @@ internal sealed class DetailedReportNavigation
             link.Url = "#" + id;
             link.GetAttributes().AddClass(reference.StartsWith("#report-member-", StringComparison.Ordinal)
                 ? "report-member-link" : "report-icm-link");
+        }
+    }
+
+    private void ApplySections(MarkdownDocument body, List<(int Start, int End)> sections, bool person)
+    {
+        var index = 0;
+        foreach (var section in sections)
+        {
+            token.ThrowIfCancellationRequested();
+            while (index < body.Count && body[index].Span.Start < section.Start) index++;
+            if (index == body.Count || body[index].Span.Start > section.Start + 1
+                || !(body[index] is ParagraphBlock || body[index] is HeadingBlock heading
+                    && (person ? heading.Level == 3 : heading.Level is 4 or 5)))
+                throw new InvalidOperationException("The detailed report could not locate a folding section heading.");
+            body[index].SetData(person ? DetailedReportPresentation.PersonSectionStartKey : DetailedReportPresentation.ItemSectionStartKey, true);
+            if (!person && body[index] is ParagraphBlock && index + 1 < body.Count
+                && body[index + 1] is ParagraphBlock && body[index + 1].Span.Start < section.End)
+                body[index + 1].SetData(DetailedReportPresentation.ItemFieldsKey, true);
+            while (index + 1 < body.Count && body[index + 1].Span.Start < section.End) index++;
+            if (body[index].Span.End >= section.End)
+                throw new InvalidOperationException("The detailed report could not preserve a folding section boundary.");
+            body[index].SetData(person ? DetailedReportPresentation.PersonSectionEndKey : DetailedReportPresentation.ItemSectionEndKey, true);
+            index++;
         }
     }
 }

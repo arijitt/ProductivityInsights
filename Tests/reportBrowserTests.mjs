@@ -308,6 +308,37 @@ try {
                 }, detailSession);
                 return result.result.value;
             }, "summary link to detailed HTML", 10000);
+            const initialFolds = await until(async () => {
+                const result = await cdp("Runtime.evaluate", {
+                    expression: `document.readyState === 'complete' && document.querySelector('details.report-person-details') && (() => {
+                        const sections = [...document.querySelectorAll('details')];
+                        return {collapsed:sections.every(section => !section.open && !section.hasAttribute('open')
+                                && !section.querySelector(':scope > div').checkVisibility()),
+                            headingsVisible:[...document.querySelectorAll('details.report-person-details > summary')].every(summary => summary.checkVisibility())};
+                    })()`, returnByValue:true
+                }, detailSession);
+                assert(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+                return result.result.value;
+            }, "initially collapsed detailed HTML", 30000);
+            assert.deepEqual(initialFolds, {collapsed:true,headingsVisible:true},
+                "Every person and item must start collapsed with the person headings available for navigation");
+            const initialItems = await cdp("Runtime.evaluate", {
+                expression: `(() => {
+                    const person = document.querySelector('details.report-person-details:has(details.report-item-details)');
+                    if (!person) return {items:false};
+                    person.querySelector(':scope > summary').click();
+                    const items = [...person.querySelectorAll('details.report-item-details')];
+                    return {items:true,personOpen:person.open,collapsed:items.every(item => !item.open
+                            && !item.querySelector(':scope > .report-item-content').checkVisibility()),
+                        headingsVisible:items.every(item => item.querySelector(':scope > summary').checkVisibility())};
+                })()`, returnByValue:true
+            }, detailSession);
+            assert.deepEqual(initialItems.result.value, fixture === "skipped-export"
+                ? {items:false} : {items:true,personOpen:true,collapsed:true,headingsVisible:true},
+                "Expanding a person must reveal the item headings without expanding any item");
+            await cdp("Runtime.evaluate", {
+                expression: "document.querySelectorAll('details:not([open])').forEach(section => section.querySelector(':scope > summary').click())"
+            }, detailSession);
             detailView = await until(async () => {
                 const result = await cdp("Runtime.evaluate", {
                     expression: `document.readyState === 'complete' && document.fonts.status === 'loaded' && document.querySelector('main h1') && ({
@@ -334,13 +365,13 @@ try {
                         rosterNames:[...document.querySelectorAll('.report-roster-member a.report-member-link')].map(link => link.textContent),
                         detailLines:[...document.querySelectorAll('div.report-line')].map(node => node.textContent),
                         workItemSummaries:[...document.querySelectorAll('h3.report-person-heading')].map(heading => {
-                            const section = heading.nextElementSibling;
+                            const section = heading.closest('details.report-person-details')?.querySelector(':scope > .report-person-content > .report-lines');
                             return section?.matches('.report-lines') && section.textContent.trim().startsWith('\u{1F4CA} Summary for ')
                                 ? {person:heading.textContent,lines:[...section.children].map(node => node.textContent.trim())} : null;
                         }).filter(Boolean),
                         workItemEntries:[...document.querySelectorAll('h4.report-record-heading')]
                             .filter(node => node.textContent.startsWith('\u{1F4CB} Work Item #'))
-                            .map(node => ({heading:node.textContent,fields:[...node.parentElement.querySelectorAll(':scope > div.report-line')]
+                            .map(node => ({heading:node.textContent,fields:[...node.closest('details.report-item-details').querySelectorAll(':scope > .report-item-content > .report-lines > div.report-line')]
                                 .map(line => {
                                     const label = line.querySelector(':scope > .report-label');
                                     return {label:label?.textContent,icon:line.querySelector(':scope > .report-icon')?.textContent,
@@ -376,15 +407,19 @@ try {
                             const heading = document.getElementById(link.hash.slice(1));
                             const buckets = [];
                             let bucket;
-                            for (let node = heading.nextElementSibling; node && !/^H[23]$/.test(node.tagName); node = node.nextElementSibling) {
+                            for (let node = heading.closest('details.report-person-details')?.querySelector(':scope > .report-person-content')?.firstElementChild; node && !/^H[23]$/.test(node.tagName); node = node.nextElementSibling) {
                                 const match = node.tagName === 'H4' && /^(Created|Contributed) ICMs \\(([0-9]+)\\)$/.exec(node.textContent);
                                 if (match) {
                                     bucket = {kind:match[1],count:Number(match[2]),incidents:[],actions:0};
                                     buckets.push(bucket);
-                                } else if (bucket && node.tagName === 'H5' && node.textContent.startsWith('Incident ')) {
-                                    bucket.incidents.push(node.textContent);
-                                } else if (bucket && [...node.querySelectorAll('th')].some(cell => cell.textContent === 'Action ID')) {
-                                    bucket.actions += node.querySelectorAll('tbody tr').length;
+                                } else if (bucket && node.matches('details.report-item-details')) {
+                                    const title = node.querySelector(':scope > summary > h5');
+                                    if (title?.textContent.startsWith('Incident ')) {
+                                        bucket.incidents.push(title.textContent);
+                                        bucket.actions += [...node.querySelectorAll('table')].filter(table =>
+                                            [...table.querySelectorAll('th')].some(cell => cell.textContent === 'Action ID'))
+                                            .reduce((count, table) => count + table.querySelectorAll('tbody tr').length, 0);
+                                    }
                                 }
                             }
                             return {member:link.textContent,buckets};
@@ -491,6 +526,74 @@ try {
                 const tableShot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
                 await writeFile(join(artifacts, `${fixture}-detailed-table.png`), Buffer.from(tableShot.data, "base64"));
             }
+            const folding = await cdp("Runtime.evaluate", {
+                expression: `(() => {
+                    const sections = [...document.querySelectorAll('details.report-person-details')];
+                    const first = sections[0];
+                    const summary = first?.querySelector(':scope > summary');
+                    const content = first?.querySelector(':scope > .report-person-content');
+                    const expanded = sections.length > 1 && sections.every(section => section.open && section.querySelector(':scope > .report-person-content').checkVisibility());
+                    summary?.click();
+                    summary?.focus();
+                    return {expanded,collapsed:!first?.open && !content?.checkVisibility(),
+                        independent:sections.slice(1).every(section => section.open),
+                        headingVisible:summary?.checkVisibility(),focused:document.activeElement === summary,
+                        noNestedSections:sections.every(section => !section.querySelector('details.report-person-details'))};
+                })()`, returnByValue: true
+            }, detailSession);
+            assert.deepEqual(folding.result.value, { expanded:true,collapsed:true,independent:true,
+                headingVisible:true,focused:true,noNestedSections:true },
+                "Clicking one user's heading must fold only that complete section, keeping the heading visible");
+            await cdp("Page.bringToFront", {}, detailSession);
+            const checkDisclosureKeys = async selector => {
+                for (const [key, code, expected] of [["Enter", "Enter", true], [" ", "Space", false]]) {
+                    await cdp("Input.dispatchKeyEvent", { type:"keyDown", key, code, text:key === "Enter" ? "\r" : " ",
+                        windowsVirtualKeyCode:key === "Enter" ? 13 : 32 }, detailSession);
+                    await cdp("Input.dispatchKeyEvent", { type:"keyUp", key, code, windowsVirtualKeyCode:key === "Enter" ? 13 : 32 }, detailSession);
+                    const keyboard = await cdp("Runtime.evaluate", {
+                        expression: `document.querySelector(${JSON.stringify(selector)}).open`, returnByValue:true
+                    }, detailSession);
+                    assert.equal(keyboard.result.value, expected, "Enter and Space must toggle the focused disclosure offline");
+                }
+            };
+            await checkDisclosureKeys('details.report-person-details');
+            const itemFolding = await cdp("Runtime.evaluate", {
+                expression: `(() => {
+                    document.querySelectorAll('details.report-person-details:not([open])').forEach(section => section.querySelector(':scope > summary').click());
+                    const items = [...document.querySelectorAll('details.report-item-details')];
+                    if (items.length === 0) return {count:0};
+                    const first = items[0];
+                    const summary = first?.querySelector(':scope > summary');
+                    const content = first?.querySelector(':scope > .report-item-content');
+                    const parent = first?.parentElement.closest('details.report-person-details');
+                    const expanded = items.length > 0 && items.every(item => item.open && item.querySelector(':scope > .report-item-content').checkVisibility());
+                    const completeHeadings = [...document.querySelectorAll('details.report-person-details h4,details.report-person-details h5')]
+                        .filter(heading => /^(?:\\u{1F4CB} Work Item #|Work item |\\u{1F504} Commit:|Incident )/.test(heading.textContent))
+                        .every(heading => heading.parentElement.matches('summary') && heading.closest('details').matches('.report-item-details'));
+                    summary?.click();
+                    const independent = parent?.open && items.slice(1).every(item => item.open);
+                    parent?.querySelector(':scope > summary').click();
+                    parent?.querySelector(':scope > summary').click();
+                    summary?.focus();
+                    return {expanded,completeHeadings,independent,preserved:parent?.open && !first?.open,
+                        hidden:!content?.checkVisibility(),headingVisible:summary?.checkVisibility(),focused:document.activeElement === summary,
+                        nesting:items.every(item => item.parentElement.closest('details')?.matches('.report-person-details') && !item.querySelector('details'))};
+                })()`, returnByValue:true
+            }, detailSession);
+            if (fixture === "skipped-export") {
+                assert.deepEqual(itemFolding.result.value, {count:0}, "Unavailable sources must not fabricate item folds");
+            } else {
+                assert.deepEqual(itemFolding.result.value, { expanded:true,completeHeadings:true,independent:true,preserved:true,
+                    hidden:true,headingVisible:true,focused:true,nesting:true },
+                    "Each record must fold independently within its person, retaining item state when the person is reopened");
+                await checkDisclosureKeys('details.report-item-details');
+            }
+            await cdp("Runtime.evaluate", {
+                expression: "document.querySelectorAll('details.report-item-details[open]').forEach(section => section.querySelector(':scope > summary').click())"
+            }, detailSession);
+            await cdp("Runtime.evaluate", {
+                expression: "document.querySelectorAll('details.report-person-details[open]').forEach(section => section.querySelector(':scope > summary').click())"
+            }, detailSession);
             for (const selector of [
                 ".report-roster-member a.report-member-link",
                 ...(incidentFixture ? ["a.report-icm-link"] : [])
@@ -509,6 +612,9 @@ try {
                 assert.deepEqual(navigation.result.value, { hash: true, visible: true, focused: true, highlighted: "solid" },
                     "Roster and ICM links must navigate, focus and highlight their detail destination offline");
             }
+            await cdp("Runtime.evaluate", {
+                expression: "document.querySelectorAll('details:not([open])').forEach(section => section.querySelector(':scope > summary').click())"
+            }, detailSession);
             await cdp("Emulation.setDeviceMetricsOverride", {
                 width: 390, height: 844, deviceScaleFactor: 1, mobile: true
             }, detailSession);
@@ -521,6 +627,9 @@ try {
                 const shot = await cdp("Page.captureScreenshot", { format: "png" }, detailSession);
                 await writeFile(join(artifacts, `${fixture}-detailed-mobile.png`), Buffer.from(shot.data, "base64"));
             }
+            await cdp("Runtime.evaluate", {
+                expression: "[...document.querySelectorAll('details[open]')].reverse().forEach(section => section.querySelector(':scope > summary').click())"
+            }, detailSession);
             await cdp("Emulation.setEmulatedMedia", { media: "print" }, detailSession);
             const print = await cdp("Runtime.evaluate", {
                 expression: "({background:getComputedStyle(document.body).backgroundColor,shadow:getComputedStyle(document.querySelector('main')).boxShadow,overflow:getComputedStyle(document.querySelector('.report-table-scroll')).overflowX,scheme:getComputedStyle(document.documentElement).colorScheme,heading:getComputedStyle(document.querySelector('h3')).color})",
@@ -529,6 +638,19 @@ try {
             assert.deepEqual(print.result.value, { background: "rgb(255, 255, 255)", shadow: "none", overflow: "visible",
                 scheme: "light", heading: "rgb(13, 27, 63)" },
                 "Print presentation must remove page decoration without clipping tables");
+            const printedDetails = await cdp("Runtime.evaluate", {
+                expression: `([...document.querySelectorAll('details')].every(section =>
+                    !section.open && section.querySelector(':scope > div').checkVisibility()
+                    && [...section.querySelector(':scope > div').children].every(child => child.checkVisibility())))`,
+                returnByValue: true
+            }, detailSession);
+            assert.equal(printedDetails.result.value, true, "Printing must include all records and evidence even when both person and item levels are folded");
+            await cdp("Emulation.setEmulatedMedia", { media: "" }, detailSession);
+            const restoredFolds = await cdp("Runtime.evaluate", {
+                expression: "[...document.querySelectorAll('details')].every(section => !section.open && !section.querySelector(':scope > div').checkVisibility())",
+                returnByValue: true
+            }, detailSession);
+            assert.equal(restoredFolds.result.value, true, "Printing must preserve the user's screen folding choices");
         } finally {
             await cdp("Target.closeTarget", { targetId: detailTarget });
         }
