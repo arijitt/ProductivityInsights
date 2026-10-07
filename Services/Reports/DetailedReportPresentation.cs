@@ -17,13 +17,22 @@ internal static class DetailedReportPresentation
     internal static readonly object PersonSectionEndKey = new();
     internal static readonly object ItemSectionStartKey = new();
     internal static readonly object ItemSectionEndKey = new();
+    internal static readonly object ItemHeadingTitleKey = new();
+    internal static readonly object ContextSectionStartKey = new();
+    internal static readonly object ContextSectionEndKey = new();
+    internal static readonly object QueueSectionStartKey = new();
+    internal static readonly object QueueSectionEndKey = new();
+    internal static readonly object OwnerSectionStartKey = new();
+    internal static readonly object OwnerSectionEndKey = new();
+    internal static readonly object RecordHeadingLevelKey = new();
     internal static readonly object ItemFieldsKey = new();
 
-    internal static void Configure(HtmlRenderer renderer, string markdown, CancellationToken token, bool workItemDetails)
+    internal static void Configure(HtmlRenderer renderer, string markdown, CancellationToken token, bool workItemDetails,
+        bool featureRegistryDetails = false)
     {
         renderer.ObjectRenderers.Insert(0, new ReportDocumentRenderer(token));
-        renderer.ObjectRenderers.Insert(0, new ReportParagraphRenderer(markdown, token, workItemDetails));
-        renderer.ObjectRenderers.Insert(0, new ReportLiteralRenderer(workItemDetails));
+        renderer.ObjectRenderers.Insert(0, new ReportParagraphRenderer(markdown, token, workItemDetails, featureRegistryDetails));
+        renderer.ObjectRenderers.Insert(0, new ReportLiteralRenderer(workItemDetails, featureRegistryDetails));
         renderer.ObjectRenderers.Insert(0, new ReportTableRenderer());
     }
 
@@ -35,7 +44,10 @@ internal static class DetailedReportPresentation
             {
                 token.ThrowIfCancellationRequested();
                 var kind = block.GetData(PersonSectionStartKey) is true ? "person"
-                    : block.GetData(ItemSectionStartKey) is true ? "item" : null;
+                    : block.GetData(ItemSectionStartKey) is true ? "item"
+                    : block.GetData(ContextSectionStartKey) is true ? "context"
+                    : block.GetData(QueueSectionStartKey) is true ? "queue"
+                    : block.GetData(OwnerSectionStartKey) is true ? "owner" : null;
                 if (kind is not null)
                 {
                     renderer.WriteLine("<details class=\"report-" + kind + "-details\">");
@@ -48,6 +60,12 @@ internal static class DetailedReportPresentation
                 if (block.GetData(ItemSectionEndKey) is true)
                     renderer.WriteLine("</div></details>");
                 if (block.GetData(PersonSectionEndKey) is true)
+                    renderer.WriteLine("</div></details>");
+                if (block.GetData(ContextSectionEndKey) is true)
+                    renderer.WriteLine("</div></details>");
+                if (block.GetData(OwnerSectionEndKey) is true)
+                    renderer.WriteLine("</div></details>");
+                if (block.GetData(QueueSectionEndKey) is true)
                     renderer.WriteLine("</div></details>");
             }
         }
@@ -63,7 +81,8 @@ internal static class DetailedReportPresentation
         }
     }
 
-    private sealed class ReportParagraphRenderer(string markdown, CancellationToken token, bool workItemDetails) : ParagraphRenderer
+    private sealed class ReportParagraphRenderer(string markdown, CancellationToken token, bool workItemDetails,
+        bool featureRegistryDetails) : ParagraphRenderer
     {
         protected override void Write(HtmlRenderer renderer, ParagraphBlock paragraph)
         {
@@ -81,11 +100,12 @@ internal static class DetailedReportPresentation
                 else lines[^1].Add(inline);
             }
             while (lines.Count > 0 && lines[^1].Count == 0) lines.RemoveAt(lines.Count - 1);
-            if (paragraph.GetData(ItemSectionStartKey) is true)
+            if (paragraph.GetData(ItemSectionStartKey) is true || paragraph.GetData(RecordHeadingLevelKey) is int)
             {
                 if (lines.Count != 1 || LineClass(PlainText(lines[0]).TrimStart()) != "report-record-heading")
                     throw new InvalidOperationException("The detailed report could not isolate an item's folding heading.");
-                WriteReportLine(renderer, lines[0]);
+                WriteReportLine(renderer, lines[0], paragraph.GetData(ItemHeadingTitleKey) as ReadOnlyMemory<char>?,
+                    paragraph.GetData(RecordHeadingLevelKey) is int level ? level : 4, paragraph);
                 return;
             }
             if (paragraph.GetData(RosterHierarchyKey) is ImmutableArray<int?> parents)
@@ -112,7 +132,10 @@ internal static class DetailedReportPresentation
                 return;
             }
             if (paragraph.GetData(ItemFieldsKey) is not true
-                && !lines.Any(line => IsRule(line, '\u2500') || LineClass(PlainText(line).TrimStart()) is not null))
+                && !(featureRegistryDetails && lines.Any(line => PlainText(line).TrimStart()
+                    .StartsWith("\U0001F33F Source branch:", StringComparison.Ordinal)))
+                && !lines.Any(line => IsRule(line, '\u2500') || featureRegistryDetails && IsRule(line, '\u2501')
+                    || LineClass(PlainText(line).TrimStart()) is not null))
             {
                 base.Write(renderer, paragraph);
                 return;
@@ -123,18 +146,31 @@ internal static class DetailedReportPresentation
             renderer.WriteLine("</div>");
         }
 
-        private void WriteReportLine(HtmlRenderer renderer, List<Inline> line)
+        private void WriteReportLine(HtmlRenderer renderer, List<Inline> line, ReadOnlyMemory<char>? headingTitle = null, int headingLevel = 4,
+            ParagraphBlock? headingBlock = null)
         {
             token.ThrowIfCancellationRequested();
+            if (featureRegistryDetails && IsRule(line, '\u2501'))
+            {
+                renderer.WriteLine("<hr class=\"report-rule report-pr-divider\" style=\"border-top:3px solid currentColor;color:inherit;opacity:1\" />");
+                return;
+            }
             if (IsRule(line, '\u2500'))
             {
                 renderer.WriteLine("<hr class=\"report-rule\" />");
                 return;
             }
             var modifier = LineClass(PlainText(line).TrimStart());
-            var tag = modifier == "report-record-heading" ? "h4" : "div";
-            renderer.Write("<" + tag + " class=\"report-line" + (modifier is null ? "" : " " + modifier) + "\">");
+            var tag = modifier == "report-record-heading" ? "h" + headingLevel : "div";
+            renderer.Write("<" + tag);
+            if (headingBlock is not null) renderer.WriteAttributes(headingBlock);
+            renderer.Write(" class=\"report-line" + (modifier is null ? "" : " " + modifier) + "\">");
             WriteLine(renderer, line);
+            if (headingTitle is { } title)
+            {
+                renderer.Write(' ');
+                renderer.WriteEscape(title.Span);
+            }
             renderer.WriteLine("</" + tag + ">");
         }
 
@@ -197,8 +233,10 @@ internal static class DetailedReportPresentation
         }
 
         private string? LineClass(string text) =>
-            text.StartsWith("\U0001F504 Commit:", StringComparison.Ordinal) || text.StartsWith("Incident Details:", StringComparison.Ordinal)
+            text.StartsWith("\U0001F504 Commit:", StringComparison.Ordinal) || text.StartsWith("\U0001F504 PR #", StringComparison.Ordinal)
+                || text.StartsWith("Incident Details:", StringComparison.Ordinal)
                 || workItemDetails && text.StartsWith("\U0001F4CB Work Item #", StringComparison.Ordinal)
+                || featureRegistryDetails && text.StartsWith("\U0001F504 Pull Request:", StringComparison.Ordinal)
                 ? "report-record-heading"
             : text.StartsWith("\U0001F4C4 ", StringComparison.Ordinal) ? "report-file"
             : text.StartsWith("\U0001F4E6 ", StringComparison.Ordinal) || text.StartsWith("\U0001F4CA ", StringComparison.Ordinal)
@@ -229,8 +267,13 @@ internal static class DetailedReportPresentation
         }
     }
 
-    private sealed class ReportLiteralRenderer(bool workItemDetails) : LiteralInlineRenderer
+    private sealed class ReportLiteralRenderer(bool workItemDetails, bool featureRegistryDetails) : LiteralInlineRenderer
     {
+        private static readonly HashSet<string> FeatureRegistryLabels = new(StringComparer.Ordinal)
+        {
+            "Source branch:", "Target branch:", "Created:", "Completed by:", "Completed:", "PR ID:"
+        };
+
         private static readonly HashSet<string> WorkItemLabels = new(StringComparer.Ordinal)
         {
             "State:", "Assignee:", "Priority:", "Created Date:", "Closed Date:", "Time to Complete:",
@@ -274,7 +317,8 @@ internal static class DetailedReportPresentation
             var colon = remainder.IndexOf(':', labelStart);
             if (colon >= labelStart && colon - labelStart < 40
                 && (Labels.Contains(remainder[labelStart..(colon + 1)])
-                    || workItemDetails && hasIcon && WorkItemLabels.Contains(remainder[labelStart..(colon + 1)])))
+                    || workItemDetails && hasIcon && WorkItemLabels.Contains(remainder[labelStart..(colon + 1)])
+                    || featureRegistryDetails && hasIcon && FeatureRegistryLabels.Contains(remainder[labelStart..(colon + 1)])))
             {
                 var label = remainder[labelStart..(colon + 1)];
                 var icon = label switch

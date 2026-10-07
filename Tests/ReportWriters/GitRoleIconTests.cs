@@ -52,10 +52,14 @@ public static class GitRoleIconTests
                     Require(pair.Contains(author.Email!, StringComparison.Ordinal) && pair.Contains(committer.Email!, StringComparison.Ordinal),
                         "Equal display names must retain their distinct qualified identities.");
             }
-            var headings = Regex.Matches(detailed, @"<h3\b[^>]*>(.*?)</h3>", RegexOptions.Singleline).Select(match => Text(match.Groups[1].Value)).ToArray();
-            Require(headings.Any(text => text.StartsWith(AuthorIcon + " Contributor: " + detailedPairs[0], StringComparison.Ordinal))
-                && headings.Any(text => text.StartsWith(CommitterIcon + " Committer: ", StringComparison.Ordinal)),
-                "Paired headings must identify both roles; committer headings must retain their h3 structure and use the writing-hand icon.");
+            var headings = Regex.Matches(detailed, @"<h3\b[^>]*class=""report-person-heading""[^>]*>(.*?)</h3>", RegexOptions.Singleline)
+                .Select(match => Text(match.Groups[1].Value)).ToArray();
+            Require(headings.Length == 4 && headings[0] == AuthorIcon + " Example Manager: 0 commit"
+                && headings[1].StartsWith(AuthorIcon + " " + author.Name, StringComparison.Ordinal)
+                && headings[1].EndsWith(": 1 commit", StringComparison.Ordinal)
+                && headings[2] == detailedPairs[0] + ": 1 commit"
+                && headings[3] == AuthorIcon + " PR Only: 0 commit",
+                "Person headings must use the same name/count format in roster order, with the shared role group next to its first participant.");
             foreach (var (label, icon) in new[] { ("Author:", AuthorIcon), ("Committer:", CommitterIcon) })
             {
                 var fields = Regex.Matches(detailed,

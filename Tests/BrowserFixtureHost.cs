@@ -35,29 +35,43 @@ internal static class BrowserFixtureHost
         builder.Services.AddOptions<IncidentManagementKustoOptions>()
             .Bind(builder.Configuration.GetSection(IncidentManagementKustoOptions.SectionName));
         builder.Services.AddSingleton<IncidentManagementMetrics>();
+        var featureRegistry = new FeatureRegistryBrowserFixture(fixture);
+        builder.Services.AddSingleton<ProductivityInsights.Services.FeatureRegistry.IFeatureRegistryPullRequestCollector>(featureRegistry);
         if (fixture is "incident-available-export" or "incident-unkeyed-export")
             IcmReports.IncidentTeamsExportTests.Register(builder.Services, new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-                "dev@example.test", unkeyed: fixture == "incident-unkeyed-export");
+                "dev@example.test", unkeyed: fixture == "incident-unkeyed-export", queryDelay: TimeSpan.FromMilliseconds(750));
         else
             builder.Services.AddScoped<IReportCollector>(_ => new FixtureCollector(fixture));
-        builder.Services.AddSingleton<IComponentActivator>(new FixtureActivator(fixture));
+        builder.Services.AddSingleton<IComponentActivator>(new FixtureActivator(fixture, featureRegistry));
         var app = builder.Build();
         app.UseStaticFiles();
         app.UseAntiforgery();
+        app.MapGet("/feature-fixture-state", () => featureRegistry.State);
+        app.MapGet("/feature-summary-reference", () => Microsoft.AspNetCore.Http.Results.Content(
+            HtmlSummaryReportWriter.Write(ReportWriters.ReportWriterFixtures.GitSnapshot(), "Git_Detailed.html"), "text/html"));
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
         await app.RunAsync();
     }
 
-    private sealed class FixtureActivator(string fixture) : IComponentActivator
+    private sealed class FixtureActivator(string fixture, FeatureRegistryBrowserFixture featureRegistry) : IComponentActivator
     {
         public IComponent CreateInstance(Type componentType)
         {
             if (componentType != typeof(AnalysisOptions))
                 return (IComponent)(Activator.CreateInstance(componentType)
                     ?? throw new InvalidOperationException($"Cannot create {componentType.Name}"));
-            var analysis = fixture is "incident-available-export" or "incident-unkeyed-export" ? "incidentManagement"
+            if (fixture.StartsWith("feature-", StringComparison.Ordinal))
+                return featureRegistry.Component();
+            if (fixture == "teams-select-all")
+                return new AnalysisOptions();
+            var analysis = fixture is "incident-available-export" or "incident-unkeyed-export" or "incident-active-groups" ? "incidentManagement"
                 : fixture is "workItems" or "incidentManagement" ? fixture : "gitCommits";
             var component = ExportIntegrationTests.PreparedComponent(analysis);
+            if (fixture == "incident-active-groups")
+                ExportIntegrationTests.Set(component, "selectedOwningTeams", new List<string>
+                {
+                    @"AZURESYNAPSEJOBSERVICE\JobPlatform", @"SYNTHETIC\SecondQueue"
+                });
             if (analysis is "incidentManagement" or "gitCommits" or "workItems")
             {
                 var root = (OrgMember)ExportIntegrationTests.Get(component, "orgTreeRoot")!;
@@ -115,6 +129,8 @@ internal static class BrowserFixtureHost
         public async Task<ReportSnapshot> CollectAsync(
             ReportRequest request, IProgress<string>? progress, CancellationToken cancellationToken)
         {
+            if (request.Analysis == Models.FeatureRegistry.FeatureRegistrySource.Analysis)
+                throw new InvalidOperationException("Feature Registry must not invoke the ordinary report collector.");
             progress?.Report("Collecting synthetic export fixture...");
             await Task.Delay(fixture == "slow-export" ? 5000 : 50, cancellationToken);
             if (fixture == "failed-export")
@@ -133,13 +149,70 @@ internal static class BrowserFixtureHost
                     throw new InvalidOperationException("A fully collected export should reuse its snapshot.");
             }
             var snapshot = ExportIntegrationTests.Snapshot(request, fixture == "large" ? 5000 : 2);
+            if (fixture == "incident-active-groups")
+            {
+                var active = snapshot.Incidents[0] with
+                {
+                    Active = true, Created = true, Mitigated = true, Resolved = true, Status = "ACTIVE"
+                };
+                var owners = new[]
+                {
+                    active.Owner, new ReportIdentity("dev"),
+                    request.Roster.Single(member => member.Email == "lead@example.test"),
+                    request.Roster.Single(member => member.Email == "peer@example.test")
+                };
+                snapshot = snapshot with
+                {
+                    Incidents = snapshot.Incidents.AddRange(owners.Select((owner, index) => active with
+                    {
+                        Id = index == 3 ? "43" : (43 + index).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        SiloId = index == 3 ? "2" : "1", Owner = owner,
+                        SourceKey = request.Sources[index == 3 ? 1 : 0].Key,
+                        OwningTeam = request.Sources[index == 3 ? 1 : 0].Scope,
+                        Title = $"Active incident {index + 1} <safe> & [title]",
+                        Url = $"https://example.test/incident/{43 + index}?fixture=active&index={index}"
+                    }))
+                };
+                var contribution = snapshot.Incidents[0] with
+                {
+                    Id = "90", Active = false, Created = false, Mitigated = false, Resolved = false,
+                    Title = "Contributed incident <safe> & [title]",
+                    Owner = request.Roster.Single(member => member.Email == "manager@example.test"),
+                    CreatedAt = request.Start.AddDays(-10), MitigatedAt = request.Start.AddDays(-5), ResolvedAt = request.Start.AddDays(-4),
+                    Url = "https://example.test/incident/90?silo=1"
+                };
+                var secondContribution = contribution with
+                {
+                    SourceKey = request.Sources[1].Key, SiloId = "2", OwningTeam = request.Sources[1].Scope,
+                    Title = "Contributed incident in second silo", Url = "https://example.test/incident/90?silo=2"
+                };
+                var action = snapshot.IncidentActions[0] with { IncidentId = "90", ActionId = "contributed-1" };
+                snapshot = snapshot with
+                {
+                    Incidents = snapshot.Incidents.AddRange(new[] { contribution, secondContribution }),
+                    IncidentActions = snapshot.IncidentActions.AddRange(new[]
+                    {
+                        action, action with { ActionId = "contributed-alias", Actor = new("dev") },
+                        action with { ActionId = "", Actor = owners[2] },
+                        action with { SourceKey = secondContribution.SourceKey, SiloId = "2" },
+                        action with { SourceKey = secondContribution.SourceKey, SiloId = "2", ActionId = "", Actor = owners[3] }
+                    })
+                };
+            }
+            if (fixture == "gitCommits")
+                snapshot = snapshot with
+                {
+                    Commits = snapshot.Commits.SetItem(0, snapshot.Commits[0] with { Message = "Merged PR 42: Original title\nFull recorded merge body" }),
+                    PullRequests = [snapshot.PullRequests[0] with { Title = "Example pull request <safe> & [title]" }]
+                };
             if (fixture == "git-role-icons")
                 snapshot = snapshot with
                 {
                     Commits = snapshot.Commits.Add(snapshot.Commits[0] with
                     {
                         Id = new string('f', 40),
-                        Committer = request.Roster.Single(member => member.Email == "lead@example.test")
+                        Committer = request.Roster.Single(member => member.Email == "lead@example.test"),
+                        Message = "Merged PR 73: Shared change <safe> & [title]\nRecorded shared merge body"
                     })
                 };
             return snapshot;

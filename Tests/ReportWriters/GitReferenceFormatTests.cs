@@ -111,6 +111,7 @@ public static class GitReferenceFormatTests
             && ReportDocumentBuilder.Build(branches).Commits.Length == 3,
             "Overlapping branch selections must remain distinguishable without double counting overall commits.");
         VerifyFileCounts(snapshot);
+        VerifyCompletedPrEvidenceScope(snapshot);
 
         GitReportRecord Commit(string id, string source, ReportIdentity identity, int day) => new()
         {
@@ -119,6 +120,45 @@ public static class GitReferenceFormatTests
             ParentCount = 1, Message = "line one\n```text\n<untrusted>", Url = "https://example.test/commit/" + id,
             Files = Enumerable.Range(0, 13).Select(index => new GitFileReportRecord($"/file_{index}.cs", "edit", 1, 0)).ToImmutableArray()
         };
+    }
+
+    private static void VerifyCompletedPrEvidenceScope(ReportSnapshot baseline)
+    {
+        var missing = baseline.Request.Sources[0] with { Key = "missing", Scope = "Unavailable repository" };
+        foreach (var snapshot in new[]
+        {
+            baseline,
+            baseline with { Commits = [] },
+            baseline with { Commits = [], PullRequests = [] },
+            baseline with
+            {
+                Request = baseline.Request with { Sources = baseline.Request.Sources.Add(missing) },
+                SkippedSources = [new(missing.Key, "HTTP 404")]
+            }
+        })
+        foreach (var view in new[] { "teams", "details", "trends" })
+        {
+            var document = ReportDocumentBuilder.Build(snapshot with { Request = snapshot.Request with { View = view } });
+            var summary = HtmlSummaryReportWriter.Write(document, "report_Detailed.html");
+            var detailed = HtmlDetailedReportWriter.Write(document);
+            Require(detailed.Contains("Completed PR evidence", StringComparison.Ordinal) == (view != "teams")
+                && detailed.Contains("Source-qualified PR", StringComparison.Ordinal) == (view != "teams"),
+                "Only Teams Git detailed HTML must omit the completed-PR evidence heading and table, including empty snapshots.");
+            foreach (var pr in document.PullRequests)
+                Require(detailed.Contains(pr.Record.Url, StringComparison.Ordinal) == (view != "teams"),
+                    "Removing the repeated table must also remove its separate View PR links, without changing other views.");
+            Require(detailed.Contains("Distinct Git totals", StringComparison.Ordinal)
+                && detailed.Contains("Git commit trends", StringComparison.Ordinal)
+                && Regex.IsMatch(detailed, $@"<strong>Completed PRs:</strong>\s*{document.PullRequests.Length}</li>")
+                && document.OverallRows.Sum(row => row.PullRequests) == document.PullRequests.Length,
+                "Removing PR evidence must retain distinct PR totals, per-person attribution and Git trends.");
+            Require(MarkdownReportWriter.Write(document).Contains("Completed PR evidence", StringComparison.Ordinal)
+                && HtmlSummaryReportWriter.Write(document, "report_Detailed.html") == summary,
+                "Legacy Markdown and summary HTML must remain unchanged.");
+            using var streamed = new StringWriter();
+            HtmlDetailedReportWriter.WriteTo(document, streamed);
+            Require(streamed.ToString() == detailed, "Streamed and buffered detailed HTML must omit the same redundant section.");
+        }
     }
 
     private static void VerifyFileCounts(ReportSnapshot baseline)

@@ -52,7 +52,8 @@ public static class HtmlDetailedReportWriter
         output.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\" />\n");
         output.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
         output.Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'\" />\n<title>");
-        output.Html(document.Title);
+        output.Html(document.Snapshot.FeatureRegistry is null ? document.Title
+            : FeatureRegistryReportPresentation.DetailedTitle(document.Snapshot.Request));
         output.Append("</title>\n<style>\n");
         output.Append(FontCss.Value);
         output.Append("""
@@ -108,22 +109,39 @@ public static class HtmlDetailedReportWriter
             @page { margin:16mm; }
             @media print { :root { color-scheme:light; --ink:#24344d; --accent:#075fc7; --border:#dce5f0; --muted:#52627a; --surface:#fff; --panel:#f8fafc; --heading:#0d1b3f; --heading-start:#edf4ff; --heading-end:#f4f1ff; --hover:#eff5ff; } body { padding:0; background:white; color:#111; font-size:10pt; } main { max-width:none; padding:0; border:0; border-radius:0; box-shadow:none; } h1 { font-size:21pt; } :target { outline:none; } .report-table-scroll { overflow:visible; } table { font-size:8.5pt; } th,td { padding:6px; } thead { display:table-header-group; } tr { break-inside:avoid; } a { color:#111; text-decoration:underline; } }
             """);
+        if (document.Snapshot.FeatureRegistry is null || document.Snapshot.Request.IsTeams)
+            output.Append("""
+
+                .report-context-details { margin:28px 0; padding:10px 14px; border:1px solid var(--border); border-radius:8px; font-size:12px; font-weight:400; color:var(--muted); }
+                .report-context-details > summary { cursor:pointer; }
+                .report-context-details > summary > h2 { display:inline; margin:0; padding:0; border:0; font-size:13px; font-weight:500; color:inherit; }
+                .report-context-details > summary:focus-visible { outline:3px solid #8bbdff; outline-offset:3px; }
+                .report-context-content :is(h3,h4,h5,h6) { font-size:12px; font-weight:500; color:inherit; }
+                .report-context-content :is(strong,.report-label,th) { font-weight:500; color:inherit; }
+                .report-context-content table { font-size:11px; color:inherit; }
+                .report-context-content a { color:inherit; }
+                @media print {
+                    .report-context-details::details-content { display:block; content-visibility:visible; }
+                    .report-context-content { display:block !important; }
+                    .report-context-details > summary { display:block; }
+                }
+                """);
         if (document.Snapshot.Request.IsTeams)
             output.Append("""
 
                 .report-person-details { margin:26px 0 12px; }
-                .report-item-details { margin:16px 0; }
-                :is(.report-person-details,.report-item-details) > summary { display:flex; align-items:baseline; gap:10px; cursor:pointer; list-style:none; }
-                :is(.report-person-details,.report-item-details) > summary::-webkit-details-marker { display:none; }
-                :is(.report-person-details,.report-item-details) > summary::before { content:'\25B6'; color:var(--accent); flex:none; }
-                :is(.report-person-details,.report-item-details)[open] > summary::before { transform:rotate(90deg); }
-                :is(.report-person-details,.report-item-details) > summary > :is(h3,h4,h5) { flex:1; min-width:0; margin:0; }
-                :is(.report-person-details,.report-item-details) > summary:focus-visible { outline:3px solid #8bbdff; outline-offset:3px; }
+                .report-item-details,.report-queue-details,.report-owner-details { margin:16px 0; }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary { display:flex; align-items:baseline; gap:10px; cursor:pointer; list-style:none; }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary::-webkit-details-marker { display:none; }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary::before { content:'\25B6'; color:var(--accent); flex:none; }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details)[open] > summary::before { transform:rotate(90deg); }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary > :is(h3,h4,h5) { flex:1; min-width:0; margin:0; }
+                :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary:focus-visible { outline:3px solid #8bbdff; outline-offset:3px; }
                 @media print {
-                    :is(.report-person-details,.report-item-details)::details-content { display:block; content-visibility:visible; }
-                    .report-person-content,.report-item-content { display:block !important; }
-                    :is(.report-person-details,.report-item-details) > summary { display:block; }
-                    :is(.report-person-details,.report-item-details) > summary::before { display:none; }
+                    :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details)::details-content { display:block; content-visibility:visible; }
+                    .report-person-content,.report-item-content,.report-queue-content,.report-owner-content { display:block !important; }
+                    :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary { display:block; }
+                    :is(.report-person-details,.report-item-details,.report-queue-details,.report-owner-details) > summary::before { display:none; }
                 }
                 """);
         output.Append("\n</style>\n</head>\n<body>\n<main>\n");
@@ -131,7 +149,8 @@ public static class HtmlDetailedReportWriter
         var renderer = new HtmlRenderer(writer);
         Pipeline.Setup(renderer);
         DetailedReportPresentation.Configure(renderer, markdown, token,
-            workItemDetails: document.Snapshot.Request.IsTeams && document.Snapshot.Request.Analysis == "workItems");
+            workItemDetails: document.Snapshot.Request.IsTeams && document.Snapshot.Request.Analysis == "workItems",
+            featureRegistryDetails: document.Snapshot.FeatureRegistry is not null);
         codeBlocks.Configure(renderer);
         renderer.Render(body);
         writer.Flush();

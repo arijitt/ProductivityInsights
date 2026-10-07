@@ -21,7 +21,7 @@ internal static class ReportFoldMarkup
             }
             else
             {
-                var kind = Regex.Match(tag.Value, @"^<details class=""report-(person|item)-details"">$");
+                var kind = Regex.Match(tag.Value, @"^<details class=""report-(person|item|context|queue|owner)-details"">$");
                 if (!kind.Success)
                     throw new InvalidOperationException("A report fold must have a known kind and start collapsed.");
                 stack.Push((kind.Groups[1].Value, tag.Index, tag.Index + tag.Length,

@@ -29,7 +29,9 @@ public static class DetailedHtmlReportTests
         WorkItemRecordedUrls();
         GitRedundantIdentityFields();
         GitDetailMetadataIcons();
-        IncidentMemberActivityDetails();
+        IncidentMemberNavigation();
+        IncidentDetailConsolidation();
+        IncidentActiveTeamLabels();
         LimitsAndCancellation();
     }
 
@@ -86,9 +88,18 @@ public static class DetailedHtmlReportTests
             for (var index = 0; index < roster.Length; index++)
             {
                 var member = snapshot.Request.Roster[index];
+                var target = Target(html, roster[index].Href).Text;
                 Require(roster[index].Text.Contains(member.Name, StringComparison.Ordinal)
-                    && Target(html, roster[index].Href).Text.Contains(member.Email!, StringComparison.Ordinal),
-                    "Roster links must target the correct qualified identity, including duplicate names and zero activity.");
+                    && (target.Contains(member.Email!, StringComparison.Ordinal)
+                        || snapshot.Request.Analysis == "workItems"
+                            && target == $"\U0001F464 {member.DisplayName}: 0 work item(s) completed"
+                        || snapshot.Request.Analysis == "gitCommits"
+                            && target == $"\U0001F464 {member.DisplayName}: 0 commit"
+                        || snapshot.Request.Analysis == "incidentManagement"
+                            && Target(html, roster[index].Href).Tag == "tr"
+                            && snapshot.Request.Roster.Count(other => other.Name == member.Name) == 1
+                            && target.TrimStart().StartsWith(member.DisplayName, StringComparison.Ordinal)),
+                    "Roster links must target the correct identity, with compact zero-activity headings and qualification for duplicate names.");
             }
             if (snapshot.Request.Analysis == "incidentManagement")
             {
@@ -109,15 +120,31 @@ public static class DetailedHtmlReportTests
         var pairedHtml = HtmlDetailedReportWriter.Write(pair);
         var pairedLinks = RosterLinks(pairedHtml);
         Require(pairedLinks[0].Href == pairedLinks[1].Href
-            && Target(pairedHtml, pairedLinks[0].Href).Text.Contains("Contributor:", StringComparison.Ordinal),
+            && Target(pairedHtml, pairedLinks[0].Href).Text.StartsWith("\U0001F464 Author:", StringComparison.Ordinal),
             "Both participants must navigate to their shared author/committer detail section.");
         AssertLinks(pairedHtml);
 
         var prOnly = HtmlDetailedReportWriter.Write(git with { Commits = [], PullRequests = [git.PullRequests[0]] });
         var prTarget = Target(prOnly, RosterLinks(prOnly)[0].Href);
-        Require(prTarget.Tag == "tr" && prTarget.Text.Contains(git.PullRequests[0].Title, StringComparison.Ordinal),
-            "A PR-only roster member must link to actual closedBy evidence, not a zero-commit placeholder.");
+        Require(prTarget.Tag == "h3" && prTarget.Text.EndsWith(": 0 commit", StringComparison.Ordinal)
+            && !prOnly.Contains("Completed PR evidence", StringComparison.Ordinal)
+            && !Links(prOnly).Any(link => link.Href == git.PullRequests[0].Url),
+            "A PR-only member must retain their zero-commit destination without the redundant PR evidence section or links.");
         AssertLinks(prOnly);
+
+        var missing = git.Request.Sources[0] with { Key = "missing-source", Scope = "Unavailable repository" };
+        var partialPrOnly = HtmlDetailedReportWriter.Write(git with
+        {
+            Request = git.Request with { Sources = git.Request.Sources.Add(missing) },
+            Commits = [], PullRequests = [git.PullRequests[0]],
+            SkippedSources = [new(missing.Key, "HTTP 404")]
+        });
+        Require(RosterLinks(partialPrOnly).All(link => Target(partialPrOnly, link.Href).Tag == "h3"
+                && Target(partialPrOnly, link.Href).Text.EndsWith(": 0 commit", StringComparison.Ordinal))
+            && partialPrOnly.Contains("not evidence of zero activity", StringComparison.Ordinal)
+            && partialPrOnly.Contains("Person headings count collected commits only.", StringComparison.Ordinal),
+            "PR-only members in partial collections need zero collected-commit destinations with explicit unavailable-data disclosures, never removed evidence rows.");
+        AssertLinks(partialPrOnly);
 
         var unresolved = HtmlDetailedReportWriter.Write(git with
         {
@@ -148,8 +175,8 @@ public static class DetailedHtmlReportTests
         };
         var actionHtml = HtmlDetailedReportWriter.Write(actionOnly);
         Require(Target(actionHtml, RosterLinks(actionHtml)[0].Href).Text.Contains("alice@example.test", StringComparison.Ordinal)
-            && actionHtml.Contains("no separate closed-incident detail group", StringComparison.Ordinal),
-            "Action-only contributors must navigate to their existing member details, not another actor's closed incidents.");
+            && Target(actionHtml, RosterLinks(actionHtml)[0].Href).Tag == "tr",
+            "Action-only contributors without owned incidents must navigate to their own overall summary row.");
         AssertLinks(actionHtml);
 
         var duplicatePaths = incidents with
@@ -207,7 +234,7 @@ public static class DetailedHtmlReportTests
         Require(roster.Length == expected.Length, "Sorting must retain every captured member, including zero activity.");
         for (var index = 0; index < expected.Length; index++)
             Require(roster[index].Text.Contains(expected[index].Email!, StringComparison.Ordinal)
-                && Target(html, roster[index].Href).Text.Contains(expected[index].Email!, StringComparison.Ordinal),
+                && Target(html, roster[index].Href).Text.Contains(expected[index].DisplayName.Trim(), StringComparison.Ordinal),
                 "Incident roster must sort by first name, case-insensitively, with full-name ties and correct identity links.");
         AssertLinks(html);
 
@@ -336,14 +363,14 @@ public static class DetailedHtmlReportTests
                 "Non-Teams Git views must retain their existing URL presentation.");
         }
         Require(MarkdownReportWriter.Write(baseline).Contains("[\U0001F310 URL]", StringComparison.Ordinal)
-            && Links(HtmlDetailedReportWriter.Write(ReportWriterFixtures.GitSnapshot())).Any(link => link.Text.StartsWith("View PR ", StringComparison.Ordinal)),
-            "Legacy Markdown and completed-PR evidence links must remain unchanged.");
+            && !Links(HtmlDetailedReportWriter.Write(ReportWriterFixtures.GitSnapshot())).Any(link => link.Text.StartsWith("View PR ", StringComparison.Ordinal)),
+            "Legacy Markdown commit links remain unchanged while Teams Git omits the redundant completed-PR evidence links.");
     }
 
     private static void WorkItemRecordedUrls()
     {
         var baseline = ReportWriterFixtures.WorkSnapshot();
-        var expectedFields = ReportDocumentBuilder.Build(baseline).WorkItems.Length * 2;
+        var expectedFields = ReportDocumentBuilder.Build(baseline).WorkItems.Length;
         foreach (var url in new[]
         {
             "https://example.test/workitems/1",
@@ -363,7 +390,7 @@ public static class DetailedHtmlReportTests
             Require(fields.Count == expectedFields
                 && fields.All(field => Links(field.Value) is [var link] && link.Text == url && link.Href == expectedHref)
                 && !Links(html).Any(link => link.Text.EndsWith("View Work Item", StringComparison.Ordinal)),
-                "Every work item must hyperlink Recorded URL in both the member details and audit appendix, without separate View Work Item links.");
+                "Every consolidated work item must hyperlink Recorded URL once, without separate View Work Item links.");
             AssertLinks(html);
         }
         foreach (var url in new[]
@@ -414,9 +441,9 @@ public static class DetailedHtmlReportTests
                 "The top-of-commit author and committer entries must remain unchanged.");
         var headers = Regex.Matches(html, @"<th\b[^>]*>(.*?)</th>", RegexOptions.Singleline)
             .Select(header => Text(header.Groups[1].Value)).ToArray();
-        Require(headers.Contains("Source key") && headers.Contains("Identity ID") && headers.Contains("Source memberships")
+        Require(headers.Contains("Source key") && headers.Contains("Identity ID") && !headers.Contains("Source memberships")
             && Text(html).Contains(recordedText, StringComparison.Ordinal),
-            "Captured source/identity context, PR memberships and matching text in recorded messages must not be removed.");
+            "Captured source/identity context and matching recorded messages remain; the removed PR table must not leave its membership column.");
         Require(HtmlSummaryReportWriter.Write(snapshot, "report_Detailed.html")
             == HtmlSummaryReportWriter.Write(baseline, "report_Detailed.html"),
             "Detailed-only field suppression must not change summary HTML.");
@@ -483,7 +510,7 @@ public static class DetailedHtmlReportTests
             RegexOptions.Singleline)
             .Select(field => (Text(field.Groups[1].Value), Text(field.Groups[2].Value), Text(field.Groups[3].Value))).ToArray();
 
-    private static void IncidentMemberActivityDetails()
+    private static void IncidentMemberNavigation()
     {
         var baseline = ReportWriterFixtures.IncidentSnapshot();
         var unkeyed = baseline.IncidentActions[0] with { ActionId = "", ActionType = "Unkeyed fixture action" };
@@ -506,8 +533,10 @@ public static class DetailedHtmlReportTests
         };
         var activeHtml = HtmlDetailedReportWriter.Write(namedActive);
         var activeLink = RosterLinks(activeHtml).Single(link => link.Text == "\u2022 Active");
-        Require(IncidentKeys(Bucket(MemberRegion(activeHtml, activeLink.Href), "Created", 1)).SequenceEqual(["silo-a:1"]),
-            "A member named Active must have personal Created details, not be mistaken for the global Active section.");
+        Require(Target(activeHtml, activeLink.Href).Text.StartsWith("\U0001F464 Active (", StringComparison.Ordinal)
+            && activeHtml.IndexOf("id=\"" + activeLink.Href[1..] + "\"", StringComparison.Ordinal)
+                < activeHtml.IndexOf("TEAM INCIDENT DETAILS BY ICM PATH:", StringComparison.Ordinal),
+            "A member named Active must link to their earlier individual section, never the global Active statistics.");
         AssertLinks(activeHtml);
 
         foreach (var html in new[]
@@ -526,60 +555,204 @@ public static class DetailedHtmlReportTests
             var html = HtmlDetailedReportWriter.Write(document);
             AssertLinks(html);
             var roster = RosterLinks(html);
-            string[][] createdKeys = [["silo-a:1"], [], []];
-            string[][] contributedKeys = [["silo-a:1", "silo-a:5", "silo-b:1"], ["silo-a:1"], []];
+            var individualsEnd = html.IndexOf("TEAM INCIDENT DETAILS BY ICM PATH:", StringComparison.Ordinal);
+            var context = ReportFoldMarkup.Parse(html).Single(fold => fold.Kind == "context");
             for (var index = 0; index < current.Request.Roster.Length; index++)
             {
                 var member = current.Request.Roster[index];
                 var link = roster.Single(link => link.Text.Contains(member.Email!, StringComparison.Ordinal));
-                var region = MemberRegion(html, link.Href);
                 var row = document.OverallRows.Single(row => row.Contributor.Contains(member.Email!, StringComparison.Ordinal));
-                var created = Bucket(region, "Created", row.Created);
-                var contributed = Bucket(region, "Contributed", row.Contributed);
-                Require(IncidentKeys(created).SequenceEqual(createdKeys[index])
-                    && IncidentKeys(contributed).SequenceEqual(contributedKeys[index]),
-                    "Member details must exactly match Created/Contributed credits, distinguishing identities and silos while deduplicating source overlap.");
-                if (index == 0)
+                var target = Target(html, link.Href);
+                var position = html.IndexOf("id=\"" + link.Href[1..] + "\"", StringComparison.Ordinal);
+                var ownsIncidents = document.Incidents.Any(incident => incident.Entity.Record.Owner.Email == member.Email);
+                Require(position < context.Start && target.Tag == (ownsIncidents ? "h3" : "tr")
+                    && (!ownsIncidents || position < individualsEnd),
+                    "Roster links must point to existing earlier individuals or overall summary rows, not recreate later sections.");
+                if (!ownsIncidents)
                 {
-                    Require(Text(created).Contains("NotTheOwner", StringComparison.Ordinal)
-                        && Text(created).Contains(current.Incidents[0].Mitigation, StringComparison.Ordinal)
-                        && Links(created).Any(link => link.Text == current.Incidents[0].Url),
-                        "Created details must retain full fields, mitigation and URL, crediting the current owner rather than creator metadata.");
-                    var actions = Regex.Matches(contributed, @"<tr\b[^>]*>(.*?)</tr>", RegexOptions.Singleline)
-                        .Select(row => Regex.Matches(row.Groups[1].Value, @"<td\b[^>]*>(.*?)</td>", RegexOptions.Singleline)
-                            .Select(cell => Text(cell.Groups[1].Value)).ToArray())
-                        .Where(cells => cells.Length == 8).ToArray();
-                    Require(actions.Select(cells => cells[3]).Order(StringComparer.Ordinal).SequenceEqual(
-                            new[] { "Not provided", "action-1", "action-2", "action-4", "action-6", "second-silo" })
-                        && actions.All(cells => !cells[4].Contains("bob@example.test", StringComparison.Ordinal)),
-                        "Contributed details must include only that member's recorded actions, retaining missing IDs and alias/source deduplication.");
+                    var summaryRow = Regex.Match(html, @"<tr\b[^>]*id=""" + Regex.Escape(link.Href[1..]) + @"""[^>]*>(.*?)</tr>", RegexOptions.Singleline);
+                    var cells = Regex.Matches(summaryRow.Value, @"<td\b[^>]*>(.*?)</td>", RegexOptions.Singleline)
+                        .Select(cell => Text(cell.Groups[1].Value)).ToArray();
+                    Require(cells.Skip(1).SequenceEqual(new[] { row.Active, row.Created, row.Mitigated, row.Resolved, row.Contributed }
+                        .Select(count => count.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+                        "A contributor without owned incidents retains all recorded credits in their linked overall row.");
                 }
-                if (index == 2)
-                    Require(Text(created).Contains("No Created incidents", StringComparison.Ordinal)
-                        && Text(contributed).Contains("No Contributed incidents", StringComparison.Ordinal),
-                        "Zero-activity members need explicit empty buckets, not another member's incident details.");
+            }
+        }
+    }
+
+    private static void IncidentDetailConsolidation()
+    {
+        var baseline = ReportWriterFixtures.IncidentSnapshot();
+        foreach (var snapshot in new[]
+        {
+            baseline,
+            baseline with { Incidents = [], IncidentActions = [] },
+            baseline with { Incidents = baseline.Incidents.Where(record => record.Id is "1" or "5").ToImmutableArray() },
+            baseline with { Incidents = baseline.Incidents.Select(record => record with { Active = true }).ToImmutableArray() },
+            baseline with
+            {
+                Request = baseline.Request with { Sources = [baseline.Request.Sources[0]] },
+                Incidents = baseline.Incidents.Where(record => record.SourceKey == baseline.Request.Sources[0].Key).ToImmutableArray(),
+                IncidentActions = baseline.IncidentActions.Where(action => action.SourceKey == baseline.Request.Sources[0].Key).ToImmutableArray()
+            }
+        })
+        {
+            var document = ReportDocumentBuilder.Build(snapshot);
+            var html = HtmlDetailedReportWriter.Write(document);
+            Require(!Regex.IsMatch(html, @"<th\b[^>]*>\s*Incident record\s*</th>", RegexOptions.IgnoreCase),
+                "Incident Record tables must be absent from every Teams detailed section.");
+            var context = ReportFoldMarkup.Parse(html).Single(fold => fold.Kind == "context");
+            var statisticsStart = html.IndexOf("<h2>Incident statistics</h2>", StringComparison.Ordinal);
+            Require(statisticsStart >= 0 && statisticsStart < context.Start
+                && Regex.IsMatch(html[(context.Start + context.Length)..], @"^\s*</main>\s*</body>\s*</html>\s*$"),
+                "Captured context must follow the full Incident statistics region and be the final section.");
+            var before = html[..statisticsStart];
+            var statistics = html[statisticsStart..context.Start];
+            Require(!statistics.Contains("report-record-heading", StringComparison.Ordinal)
+                && !statistics.Contains("Source-qualified key:", StringComparison.Ordinal)
+                && !statistics.Contains("Visible incident metadata", StringComparison.Ordinal)
+                && !statistics.Contains("Mitigation text", StringComparison.Ordinal)
+                && !statistics.Contains("<h2>Incident details</h2>", StringComparison.Ordinal)
+                && RecordedUrlFields(statistics).Count == 0,
+                "The final statistics region must not repeat complete incident records or metadata.");
+            Require(statistics.Contains("Distinct incident totals and weighted duration statistics", StringComparison.Ordinal)
+                && !html.Contains("Recorded incident action history and contribution evidence", StringComparison.Ordinal)
+                && !html.Contains("Several recorded actions on one incident count as one Contributed incident for that actor.", StringComparison.Ordinal)
+                && statistics.Contains("<h2>Incident statistics</h2>", StringComparison.Ordinal),
+                "Removing the later individuals must retain global Active and distinct overall statistics.");
+            var totalsStart = statistics.IndexOf("<h2>Distinct incident totals and weighted duration statistics</h2>", StringComparison.Ordinal);
+            var activeStatistics = statistics[..totalsStart];
+            var multipleTeams = snapshot.Request.Sources.Select(source => source.Scope).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+            var activeTableHeadings = multipleTeams
+                ? new[] { "Severity counts", "TTD by severity", "Active severity by owning team", "Active TTD by owning team and severity" }
+                : new[] { "Severity counts", "TTD by severity" };
+            Require(Regex.Matches(activeStatistics, @"<h4>(.*?)</h4>").Select(heading => Text(heading.Groups[1].Value))
+                    .SequenceEqual(activeTableHeadings)
+                && Regex.Matches(activeStatistics, "<table>").Count == activeTableHeadings.Length,
+                "Teams global Active statistics must retain severity and TTD tables, with no TTM/TTR heading or table.");
+            Require(Regex.Matches(statistics[totalsStart..], @"<h4>(.*?)</h4>").Select(heading => Text(heading.Groups[1].Value))
+                    .SequenceEqual(new[] { "Severity counts", "TTD by severity", "TTM by severity", "TTR by severity" })
+                && Regex.Matches(statistics[totalsStart..], "<table>").Count == 4,
+                "Removing Active TTM/TTR must preserve all overall severity and duration tables.");
+            Require(Regex.Matches(activeStatistics, @"<h3\b[^>]*>(.*?)</h3>").Select(heading => Text(heading.Groups[1].Value))
+                    .SequenceEqual(new[] { "Active" })
+                && activeStatistics.Contains("Active TTD by owning team and severity", StringComparison.Ordinal) == multipleTeams
+                && !statistics.Contains("<details", StringComparison.Ordinal)
+                && !html.Contains("Created ICMs (", StringComparison.Ordinal)
+                && !html.Contains("Contributed ICMs (", StringComparison.Ordinal)
+                && !html.Contains("Recorded actions for incident", StringComparison.Ordinal),
+                "Only global Active statistics may precede overall totals; removed individual sections must not reappear elsewhere.");
+            Require(!Regex.IsMatch(ReportFoldMarkup.OutsidePersons(html), @"<th\b[^>]*>\s*Action ID\s*</th>"),
+                "No global action-history table may remain outside the member sections.");
+            var actionRows = Regex.Matches(html, @"<table\b[^>]*>(.*?)</table>", RegexOptions.Singleline)
+                .Where(table => Regex.Matches(table.Value, @"<th\b[^>]*>(.*?)</th>", RegexOptions.Singleline)
+                    .Any(header => Text(header.Groups[1].Value) == "Action ID"))
+                .Sum(table => Regex.Matches(table.Value, @"<tr\b[^>]*>(.*?)</tr>", RegexOptions.Singleline)
+                    .Count(row => row.Value.Contains("<td", StringComparison.Ordinal)));
+            Require(actionRows == 0,
+                "Removed individual sections must not leave orphaned or relocated action-history tables.");
+            Require(Regex.Matches(before, "Source-qualified key:").Count == document.Incidents.Length
+                && Regex.Matches(before, "Visible incident metadata").Count == document.Incidents.Length
+                && Regex.Matches(before, "Mitigation text").Count == document.Incidents.Length
+                && RecordedUrlFields(before).Count == document.Incidents.Length,
+                "Every distinct incident's supplemental evidence must be retained exactly once in the earlier categories.");
+            foreach (var record in document.Incidents.Select(incident => incident.Entity.Record))
+            {
+                Require(Text(before).Contains(record.EntityKey, StringComparison.Ordinal)
+                    && Text(before).Contains(record.Mitigation, StringComparison.Ordinal)
+                    && record.Metadata.All(field => Text(before).Contains(field.Key, StringComparison.Ordinal)
+                        && Text(before).Contains(field.Value, StringComparison.Ordinal)),
+                    "Consolidation must not remove recorded metadata, mitigation or silo-qualified identity.");
+            }
+            foreach (var link in Links(statistics).Where(link => link.Class == "report-incident-link"))
+                Require(Target(before, link.Href).Text.StartsWith("Incident Details:", StringComparison.Ordinal),
+                    "References in the statistics region must resolve to real earlier incident headings.");
+            AssertLinks(html);
+        }
+        Require(MarkdownReportWriter.Write(baseline).Contains("## Incident details", StringComparison.Ordinal)
+            && HtmlDetailedReportWriter.Write(baseline with { Request = baseline.Request with { View = "details" } })
+                .Contains("<h2>Incident details</h2>", StringComparison.Ordinal),
+            "Legacy Markdown and non-Teams Incident Details must retain their original full appendix.");
+        Require(MarkdownReportWriter.Write(baseline).Contains("## Recorded incident action history and contribution evidence", StringComparison.Ordinal)
+            && HtmlDetailedReportWriter.Write(baseline with { Request = baseline.Request with { View = "details" } })
+                .Contains("<h2>Recorded incident action history and contribution evidence</h2>", StringComparison.Ordinal),
+            "Removing the Teams global table must not remove the original action-history section from other formats or views.");
+        var legacyActive = Regex.Match(MarkdownReportWriter.Write(baseline), @"### Active\n(.*?)(?=\n### |\z)", RegexOptions.Singleline).Value;
+        var detailsActive = Regex.Match(HtmlDetailedReportWriter.Write(baseline with { Request = baseline.Request with { View = "details" } }),
+            @"<h3>Active</h3>(.*?)(?=<h[23]\b|</main>)", RegexOptions.Singleline).Value;
+        Require(legacyActive.Contains("#### TTM by severity", StringComparison.Ordinal)
+            && legacyActive.Contains("#### TTR by severity", StringComparison.Ordinal)
+            && detailsActive.Contains("<h4>TTM by severity</h4>", StringComparison.Ordinal)
+            && detailsActive.Contains("<h4>TTR by severity</h4>", StringComparison.Ordinal),
+            "Legacy Markdown and Incident Details must retain TTM/TTR in their Active sections.");
+    }
+
+    private static void IncidentActiveTeamLabels()
+    {
+        var baseline = ReportWriterFixtures.IncidentSnapshot();
+        foreach (var (tenant, team) in new[]
+        {
+            ("Tenant", "Shared team"),
+            ("Tenant (silo literal)", "Team <safe> & (silo literal)"),
+            ("", "")
+        })
+        {
+            var snapshot = baseline with
+            {
+                Incidents = baseline.Incidents.Where(record => record.Active).Select(record => record with
+                {
+                    OwningTenant = tenant, OwningTeam = team
+                }).ToImmutableArray(),
+                IncidentActions = []
+            };
+            var document = ReportDocumentBuilder.Build(snapshot);
+            var html = HtmlDetailedReportWriter.Write(document);
+            var expectedLabel = $"{(tenant.Length == 0 ? "-" : tenant)}\\{(team.Length == 0 ? "-" : team)}";
+            var severity = Table("Active severity by owning team");
+            var durations = Table("Active TTD by owning team and severity");
+            Require(severity.Length == 2 && durations.Length == 2 && document.ActiveTeamStatistics.Length == 2,
+                "Removing the displayed silo suffix must not merge same-named teams in different silos.");
+            Require(severity.All(row => row[0] == expectedLabel) && durations.All(row => row[0] == expectedLabel),
+                "Both Active team tables must render captured tenant/team labels without the generated silo suffix.");
+            Require(severity.All(row => row.Skip(1).SequenceEqual(new[] { "2", "1" }))
+                && durations[0].Skip(1).SequenceEqual(new[] { "2", "1", "1.0 hours", "1.0 hours", "1.0 hours" })
+                && durations[1].Skip(1).SequenceEqual(new[] { "2", "0", "-", "-", "-" }),
+                "Label-only changes must preserve counts, valid durations and missing-duration semantics.");
+            var severityLinks = Links(TableMarkup(html, "Active severity by owning team"));
+            var durationLinks = Links(TableMarkup(html, "Active TTD by owning team and severity"));
+            Require(severityLinks.Length == 2 && severityLinks.SequenceEqual(durationLinks)
+                && severityLinks.All(link => link.Class == "report-icm-link" && link.Text == expectedLabel)
+                && severityLinks.Select(link => link.Href).Distinct(StringComparer.Ordinal).Count() == 2,
+                "Both tables must link same-caption owning teams to matching, distinct silo-qualified ICM-path destinations.");
+            AssertLinks(html);
+            var details = HtmlDetailedReportWriter.Write(snapshot with { Request = snapshot.Request with { View = "details" } });
+            Require(!details.Contains("<h4>Active severity by owning team</h4>", StringComparison.Ordinal)
+                && !details.Contains("<h4>Active TTD by owning team and severity</h4>", StringComparison.Ordinal),
+                "The multi-team statistics tables must remain exclusive to Teams reports.");
+            var legacy = MarkdownReportWriter.Write(document);
+            Require(legacy.Contains(@"\(silo silo-a\)", StringComparison.Ordinal)
+                && legacy.Contains(@"\(silo silo-b\)", StringComparison.Ordinal)
+                && !legacy.Contains("report-source-reference-", StringComparison.Ordinal)
+                && !html.Contains("<safe>", StringComparison.Ordinal),
+                "Legacy Markdown keeps unlinked silo annotations and captured label text must remain encoded.");
+
+            string[][] Table(string heading)
+            {
+                return Regex.Matches(TableMarkup(html, heading), @"<tr\b[^>]*>(.*?)</tr>", RegexOptions.Singleline)
+                    .Select(row => Regex.Matches(row.Value, @"<td\b[^>]*>(.*?)</td>", RegexOptions.Singleline)
+                        .Select(cell => Text(cell.Groups[1].Value)).ToArray())
+                    .Where(row => row.Length != 0).ToArray();
             }
         }
 
-        static string MemberRegion(string html, string href)
+        static string TableMarkup(string html, string heading)
         {
-            var match = Regex.Match(html, @"<h3\b[^>]*\bid=""" + Regex.Escape(href[1..])
-                + @"""[^>]*>.*?</h3>(.*?)(?=<h[23]\b|</main>)", RegexOptions.Singleline);
-            Require(match.Success, "The roster link must lead to a real per-member detail section.");
+            var match = Regex.Match(html, @"<h4>" + Regex.Escape(heading)
+                + @"</h4>\s*<div\b[^>]*>\s*<table>(.*?)</table>", RegexOptions.Singleline);
+            Require(match.Success, "Both Active team statistics tables must remain present.");
             return match.Groups[1].Value;
         }
-
-        static string Bucket(string region, string kind, int count)
-        {
-            var match = Regex.Match(region, @"<h4\b[^>]*>" + kind + @" ICMs \(" + count
-                + @"\)</h4>(.*?)(?=<h[234]\b|$)", RegexOptions.Singleline);
-            Require(match.Success, $"Each member needs a {kind} bucket matching the existing count.");
-            return match.Groups[1].Value;
-        }
-
-        static IEnumerable<string> IncidentKeys(string bucket) => Regex.Matches(bucket,
-                @"<li>\s*<strong>(?:<span\b[^>]*>)?Source-qualified key:(?:</span>)?</strong>\s*(.*?)</li>", RegexOptions.Singleline)
-            .Select(match => Text(match.Groups[1].Value)).Order(StringComparer.Ordinal);
     }
 
     private sealed record ReportLink(string Href, string Class, string Text);
@@ -611,7 +784,7 @@ public static class DetailedHtmlReportTests
         Require(ids.Length == ids.Distinct(StringComparer.Ordinal).Count(), "Navigation IDs must be unique.");
         foreach (var link in Links(html).Where(link => link.Href.StartsWith("#", StringComparison.Ordinal)))
         {
-            Require(Regex.IsMatch(link.Href, @"^#report-(member|icm)-[0-9]+$"),
+            Require(Regex.IsMatch(link.Href, @"^#report-(member|icm|incident)-[0-9]+$"),
                 "Internal navigation must resolve to generated safe identifiers, never an unresolved placeholder.");
             Target(html, link.Href);
         }
@@ -621,22 +794,39 @@ public static class DetailedHtmlReportTests
     {
         var document = ReportDocumentBuilder.Build(snapshot);
         var archive = ReportArchiveBuilder.Build(snapshot);
-        var stem = Path.GetFileNameWithoutExtension(archive.FileName);
+        var analysis = snapshot.Request.Analysis switch
+        {
+            "gitCommits" => "Git_Commits",
+            "workItems" => "Work_Items",
+            "incidentManagement" => "Incident_Resolutions",
+            _ => throw new InvalidOperationException("Unexpected archive test analysis.")
+        };
+        var stem = $"{analysis}_{snapshot.Request.View}_{snapshot.Request.Start:yyyyMMdd}_to_{snapshot.Request.End:yyyyMMdd}";
+        var archiveStem = $"{stem}_{snapshot.Request.RunId:N}";
+        Require(archive.FileName == archiveStem + ".zip"
+            && ReportArchiveBuilder.GetFileName(snapshot.Request) == archive.FileName,
+            "ZIP naming and Save As suggestions must preserve the run GUID for every supported analysis/view.");
         using var content = archive.Content;
         using var zip = new ZipArchive(content, ZipArchiveMode.Read);
-        Require(zip.Entries.Count == 2 && zip.Entries.All(entry => entry.Name.EndsWith(".html", StringComparison.Ordinal)),
-            "The ZIP must replace, not accompany, the Markdown entry with HTML.");
+        Require(zip.Entries.Count == 2 && zip.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.Ordinal)
+            .SetEquals([stem + ".html", stem + "_Detailed.html"]),
+            "The ZIP must contain exactly two standalone HTML files named by analysis/view/dates, without the run GUID.");
         var detailed = Read(zip.GetEntry(stem + "_Detailed.html"));
         var summary = Read(zip.GetEntry(stem + ".html"));
-        var previousSummary = HtmlSummaryReportWriter.Write(document, stem + ".md");
-        Require(summary == previousSummary.Replace("./" + Uri.EscapeDataString(stem + ".md"),
+        var previousSummary = HtmlSummaryReportWriter.Write(document, archiveStem + "_Detailed.html");
+        Require(summary == previousSummary.Replace("./" + Uri.EscapeDataString(archiveStem + "_Detailed.html"),
                 "./" + Uri.EscapeDataString(stem + "_Detailed.html"), StringComparison.Ordinal),
-            "The existing summary must remain identical except for its detail-link target.");
+            "The existing summary must remain identical except for its GUID-free detail-link target.");
         Require(detailed == HtmlDetailedReportWriter.Write(document)
             && detailed.StartsWith("<!DOCTYPE html>", StringComparison.Ordinal)
             && detailed.Contains("<h1>", StringComparison.Ordinal) && detailed.Contains("<table>", StringComparison.Ordinal)
             && detailed.Contains("<strong>", StringComparison.Ordinal),
             "Details must render headings, tables and emphasis as HTML, not display raw Markdown.");
+        Require(detailed.Contains("Captured manager / report roster", StringComparison.Ordinal)
+               == !(snapshot.Request.IsTeams && snapshot.Request.Analysis == "workItems")
+            && summary.Contains("Captured roster:", StringComparison.Ordinal)
+            && MarkdownReportWriter.Write(document).Contains("Captured manager / report roster", StringComparison.Ordinal),
+            "Only Teams Work Items detailed HTML must omit the duplicate captured roster; other views, analyses, summary HTML and legacy Markdown retain it.");
 
         var text = WebUtility.HtmlDecode(Regex.Replace(detailed, "<[^>]*>", "")).Replace("\r\n", "\n", StringComparison.Ordinal);
         void Contains(string? value)
@@ -660,9 +850,14 @@ public static class DetailedHtmlReportTests
             Contains(commit.Message);
             foreach (var file in commit.Files) Contains(file.Path);
         }
-        foreach (var pr in snapshot.PullRequests) Contains(pr.Title);
+        if (snapshot.Request.IsTeams && snapshot.Request.Analysis == "gitCommits")
+            Require(!text.Contains("Completed PR evidence", StringComparison.Ordinal),
+                "Teams Git archives must omit the repeated completed-PR evidence section.");
+        else
+            foreach (var pr in snapshot.PullRequests) Contains(pr.Title);
         foreach (var incident in snapshot.Incidents) { Contains(incident.Title); Contains(incident.Mitigation); }
-        foreach (var action in snapshot.IncidentActions) { Contains(action.ActionId); Contains(action.ActionType); }
+        if (!(snapshot.Request.IsTeams && snapshot.Request.Analysis == "incidentManagement"))
+            foreach (var action in snapshot.IncidentActions) { Contains(action.ActionId); Contains(action.ActionType); }
     }
 
     private static void Safety()
@@ -714,8 +909,11 @@ public static class DetailedHtmlReportTests
             }).ToImmutableArray()
         };
         Require(Encoding.UTF8.GetByteCount(MarkdownReportWriter.Write(repeatedDetails)) < ReportRenderingLimits.MaximumOutputBytes,
-            "The per-member expansion fixture must fit before adding Created and Contributed copies.");
-        Throws<ReportSizeLimitException>(() => HtmlDetailedReportWriter.Write(repeatedDetails));
+            "The former per-member expansion fixture must fit without repeated metadata and mitigation.");
+        var consolidated = HtmlDetailedReportWriter.Write(repeatedDetails);
+        Require(Regex.Matches(consolidated, "Mitigation text").Count == 14
+            && Encoding.UTF8.GetByteCount(consolidated) < ReportRenderingLimits.MaximumOutputBytes,
+            "Removing repeated incident blocks must allow this formerly oversized export to retain each full mitigation once.");
     }
 
     private static string Read(ZipArchiveEntry? entry)

@@ -41,6 +41,8 @@ public static class HtmlSummaryReportWriter
     {
         ArgumentNullException.ThrowIfNull(document);
         cancellationToken.ThrowIfCancellationRequested();
+        if (document.Snapshot.FeatureRegistry is not null)
+            return FeatureRegistryReportPresentation.Summary(document, markdownFileName, cancellationToken, countOnly, destination, maximumBytes);
         var markdownUrl = ReportFormatting.MarkdownFileUrl(markdownFileName);
         var output = new ReportOutput(cancellationToken, countOnly, destination, maximumBytes);
         var snapshot = document.Snapshot;
@@ -54,34 +56,7 @@ public static class HtmlSummaryReportWriter
         output.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>");
         output.Html(document.Title);
         output.Append("</title>\n<style>\n");
-        output.Append("""
-            :root { color-scheme: dark; }
-            body { background:#1e1e1e; color:#e0e0e0; font-family:'Segoe UI',Tahoma,Arial,sans-serif; margin:24px; }
-            h1 { color:#fff; border-bottom:2px solid #3e3e42; padding-bottom:8px; margin-top:0; }
-            h2 { color:#9cdcfe; margin-top:32px; margin-bottom:8px; font-size:1.05em; }
-            table { border-collapse:collapse; width:100%; table-layout:fixed; margin-top:8px; font-size:0.92em; }
-            th, td { border:1px solid #3e3e42; padding:6px 10px; text-align:left; vertical-align:top; white-space:pre-wrap; }
-            th { background:#2d2d30; color:#fff; font-weight:600; }
-            tbody tr:nth-child(odd) { background:#252526; }
-            tbody tr:nth-child(even) { background:#1e1e1e; }
-            tbody tr:hover { background:#37373d; }
-            tfoot { font-weight:600; background:#2d2d30; }
-            .meta { color:#a0a0a0; font-size:0.85em; margin-bottom:24px; white-space:normal; }
-            h1, h2, th, td, li, p, a, .meta { overflow-wrap:anywhere; word-break:break-word; }
-            .value { white-space:pre-wrap; }
-            a { color:#9cdcfe; }
-            @media (max-width:700px) { body { margin:12px; } th,td { padding:4px; font-size:0.85em; } }
-            """);
-        if (referenceStyle)
-            output.Append("""
-                h1, th { color:#ffffff; }
-                table { table-layout:auto; }
-                th, td { white-space:normal; }
-                .meta { color:#808080; }
-                .report-context { margin-top:32px; }
-                .report-context summary { color:#9cdcfe; cursor:pointer; }
-                .report-warning { color:#ffd166; }
-                """);
+        WriteStyles(output, referenceStyle);
         output.Append("\n</style>\n</head>\n<body>\n<h1>");
         output.Html(document.Title);
         output.Append("</h1>\n");
@@ -282,5 +257,37 @@ public static class HtmlSummaryReportWriter
             }
             output.Append("</tr>\n");
         }
+    }
+
+    internal static void WriteStyles(ReportOutput output, bool referenceStyle)
+    {
+        output.Append("""
+            :root { color-scheme: dark; }
+            body { background:#1e1e1e; color:#e0e0e0; font-family:'Segoe UI',Tahoma,Arial,sans-serif; margin:24px; }
+            h1 { color:#fff; border-bottom:2px solid #3e3e42; padding-bottom:8px; margin-top:0; }
+            h2 { color:#9cdcfe; margin-top:32px; margin-bottom:8px; font-size:1.05em; }
+            table { border-collapse:collapse; width:100%; table-layout:fixed; margin-top:8px; font-size:0.92em; }
+            th, td { border:1px solid #3e3e42; padding:6px 10px; text-align:left; vertical-align:top; white-space:pre-wrap; }
+            th { background:#2d2d30; color:#fff; font-weight:600; }
+            tbody tr:nth-child(odd) { background:#252526; }
+            tbody tr:nth-child(even) { background:#1e1e1e; }
+            tbody tr:hover { background:#37373d; }
+            tfoot { font-weight:600; background:#2d2d30; }
+            .meta { color:#a0a0a0; font-size:0.85em; margin-bottom:24px; white-space:normal; }
+            h1, h2, th, td, li, p, a, .meta { overflow-wrap:anywhere; word-break:break-word; }
+            .value { white-space:pre-wrap; }
+            a { color:#9cdcfe; }
+            @media (max-width:700px) { body { margin:12px; } th,td { padding:4px; font-size:0.85em; } }
+            """);
+        if (referenceStyle)
+            output.Append("""
+                h1, th { color:#ffffff; }
+                table { table-layout:auto; }
+                th, td { white-space:normal; }
+                .meta { color:#808080; }
+                .report-context { margin-top:32px; }
+                .report-context summary { color:#9cdcfe; cursor:pointer; }
+                .report-warning { color:#ffd166; }
+                """);
     }
 }

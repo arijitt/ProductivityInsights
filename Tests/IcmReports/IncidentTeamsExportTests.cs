@@ -68,9 +68,81 @@ public static class IncidentTeamsExportTests
                 () => collector.CollectAsync(request with { View = "details" }, null, CancellationToken.None),
                 "Details retains its explicit verification policy.");
         }
+        await QueueProgress();
     }
 
-    internal static void Register(IServiceCollection services, IConfiguration configuration, string actor, bool unkeyed = false)
+    private static async Task QueueProgress()
+    {
+        var services = new ServiceCollection();
+        Register(services, new ConfigurationBuilder().Build(), "alice");
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var collector = scope.ServiceProvider.GetRequiredService<IReportCollector>();
+        var source = scope.ServiceProvider.GetRequiredService<AvailableSource>();
+        source.Scenario = "empty";
+        var request = IncidentCollectorFixtures.Request() with
+        {
+            View = "teams", Roster = IncidentCollectorFixtures.Roster,
+            Sources =
+            [
+                new("first", "", "", "Tenant\\Queue Z"),
+                new("second", "", "", "Tenant\\Queue A <test>"),
+                new("overlap", "", "", " Tenant\\Queue Z ")
+            ]
+        };
+        List<string> messages = [];
+        var progress = new SynchronousProgress(messages);
+        var expected = new[]
+        {
+            "Collecting available ICM incidents (queue 1 of 2): Tenant\\Queue Z",
+            "Collecting recorded ICM actions (queue 1 of 2): Tenant\\Queue Z",
+            "Collecting available ICM incidents (queue 2 of 2): Tenant\\Queue A <test>",
+            "Collecting recorded ICM actions (queue 2 of 2): Tenant\\Queue A <test>"
+        };
+        var queries = 0;
+        source.QueryStarted = query =>
+        {
+            IncidentCollectorFixtures.Check(messages.Count == queries + 1 && messages[^1] == expected[queries]
+                && (string)query.Parameters["owningTeam"] == (queries < 2 ? "Tenant\\Queue Z" : "Tenant\\Queue A <test>")
+                && query.Text == (queries % 2 == 0 ? IncidentReportCollector.IncidentQuery : IncidentReportCollector.ActionQuery),
+                "Queue and stage progress must be published before the matching data query, in captured distinct-queue order.");
+            queries++;
+        };
+        var snapshot = await collector.CollectAsync(request, progress, CancellationToken.None);
+        IncidentCollectorFixtures.Check(messages.SequenceEqual(expected) && queries == 4
+            && source.VerificationRequests == 0 && snapshot.Request == request
+            && snapshot.Incidents.IsEmpty && snapshot.IncidentActions.IsEmpty,
+            "Progress must count distinct queues, retain full queue names and leave data/coverage behavior unchanged.");
+
+        foreach (var scenario in new[] { "failure", "partial", "action-failure" })
+        {
+            messages.Clear();
+            queries = 0;
+            source.Scenario = scenario;
+            await IncidentCollectorFixtures.ExpectFailure(() => collector.CollectAsync(request, progress, CancellationToken.None), scenario);
+            IncidentCollectorFixtures.Check(messages.SequenceEqual(expected.Take(scenario == "action-failure" ? 2 : 1)),
+                "A failed or partial query must not announce later stages or queues.");
+        }
+        source.Scenario = "empty";
+        foreach (var cancelAt in new[] { 1, 2 })
+        {
+            messages.Clear();
+            queries = 0;
+            using var cancellation = new CancellationTokenSource();
+            source.QueryStarted = _ => { if (++queries == cancelAt) cancellation.Cancel(); };
+            await IncidentCollectorFixtures.ExpectCancellation(() => collector.CollectAsync(request, progress, cancellation.Token));
+            IncidentCollectorFixtures.Check(messages.SequenceEqual(expected.Take(cancelAt)),
+                "Cancellation must not announce later queue work.");
+        }
+    }
+
+    private sealed class SynchronousProgress(List<string> messages) : IProgress<string>
+    {
+        public void Report(string value) => messages.Add(value);
+    }
+
+    internal static void Register(IServiceCollection services, IConfiguration configuration, string actor, bool unkeyed = false,
+        TimeSpan queryDelay = default)
     {
         services.AddOptions<IncidentManagementKustoOptions>().Configure(options =>
         {
@@ -80,7 +152,7 @@ public static class IncidentTeamsExportTests
         });
         services.AddReportExports(configuration);
         services.AddScoped(provider => new AvailableSource(provider.GetRequiredService<IIncidentReportCoverageProvider>(), actor)
-            { Scenario = unkeyed ? "unkeyed" : null });
+            { Scenario = unkeyed ? "unkeyed" : null, QueryDelay = queryDelay });
         services.AddScoped<IIncidentReportQueryClient>(provider => provider.GetRequiredService<AvailableSource>());
     }
 
@@ -89,6 +161,8 @@ public static class IncidentTeamsExportTests
         public int Queries { get; private set; }
         public int VerificationRequests { get; private set; }
         public string? Scenario { get; set; }
+        public Action<IncidentReportQuery>? QueryStarted { get; set; }
+        public TimeSpan QueryDelay { get; init; }
 
         public Task<IncidentReportCoverage?> GetCoverageAsync(IncidentReportCoverageRequest request, CancellationToken token)
         {
@@ -96,7 +170,7 @@ public static class IncidentTeamsExportTests
             return coverage.GetCoverageAsync(request, token);
         }
 
-        public Task<IncidentReportQueryResult> ExecuteAsync(IncidentReportQuery query, CancellationToken token)
+        public async Task<IncidentReportQueryResult> ExecuteAsync(IncidentReportQuery query, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             if (query.IsManagement)
@@ -105,10 +179,12 @@ public static class IncidentTeamsExportTests
                 throw new IncidentReportExportException("Fixture: metadata permissions are unavailable.");
             }
             Queries++;
+            QueryStarted?.Invoke(query);
+            if (QueryDelay > TimeSpan.Zero) await Task.Delay(QueryDelay, token);
             if (Scenario == "failure" || Scenario == "action-failure" && query.Text == IncidentReportCollector.ActionQuery)
                 throw new IncidentReportExportException("Fixture: required data query failed.");
-            if (Scenario == "partial") return Task.FromResult(new IncidentReportQueryResult([], false));
-            if (Scenario == "empty") return Task.FromResult(new IncidentReportQueryResult([]));
+            if (Scenario == "partial") return new IncidentReportQueryResult([], false);
+            if (Scenario == "empty") return new IncidentReportQueryResult([]);
             var start = new DateTimeOffset((DateTime)query.Parameters["startDate"]);
             var when = start.AddHours(1);
             var team = (string)query.Parameters["owningTeam"];
@@ -117,12 +193,12 @@ public static class IncidentTeamsExportTests
                 var row = IncidentCollectorFixtures.Incident(42, "Resolved", start, team,
                     modified: when, mitigated: when.AddMinutes(-30), resolved: when, owner: actor, mitigator: actor, resolver: actor);
                 if (Scenario == "missing-column") row = row.Remove("Title");
-                return Task.FromResult(new IncidentReportQueryResult(Scenario == "limit"
-                    ? Enumerable.Repeat(row, IncidentReportCollector.MaximumRowsPerQuery + 1).ToImmutableArray() : [row]));
+                return new IncidentReportQueryResult(Scenario == "limit"
+                    ? Enumerable.Repeat(row, IncidentReportCollector.MaximumRowsPerQuery + 1).ToImmutableArray() : [row]);
             }
             IncidentCollectorFixtures.Check(query.Text == IncidentReportCollector.ActionQuery, "Unexpected data query.");
-            return Task.FromResult(new IncidentReportQueryResult(
-                [IncidentCollectorFixtures.Action(42, Scenario == "unkeyed" ? null : 100, actor, when.AddMinutes(-10))]));
+            return new IncidentReportQueryResult(
+                [IncidentCollectorFixtures.Action(42, Scenario == "unkeyed" ? null : 100, actor, when.AddMinutes(-10))]);
         }
     }
 }

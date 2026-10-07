@@ -27,11 +27,12 @@ public static class PersonFoldingTests
 
         var work = ReportWriterFixtures.WorkSnapshot();
         var workSections = Sections(HtmlDetailedReportWriter.Write(work));
-        Require(workSections.Length == ReportDocumentBuilder.Build(work).OverallRows.Length * 2,
-            "Each Work Items member needs independent completion and audit folds, including zero and unassigned members.");
+        var workRows = ReportDocumentBuilder.Build(work).OverallRows;
+        Require(workSections.Length == workRows.Length,
+            "Every Work Items member needs exactly one completion section, without separate audit folds.");
         Require(workSections.Any(section => section.Contains("State change history", StringComparison.Ordinal))
-            && workSections.Any(section => section.Contains("Work Items with Active Work Time", StringComparison.Ordinal)),
-            "Work-item histories and person summaries must be inside their respective folds.");
+            && workSections.Any(section => section.Contains("Work items with positive active-work time", StringComparison.Ordinal)),
+            "Work-item histories and the relocated person-summary tables must be inside the completion folds.");
 
         var git = ReportWriterFixtures.GitSnapshot();
         var pair = git with { Commits = [git.Commits[0] with { Committer = git.Request.Roster[1] }], PullRequests = [] };
@@ -44,7 +45,7 @@ public static class PersonFoldingTests
         var prOnly = git with { Commits = [] };
         Check(prOnly);
         Require(Sections(HtmlDetailedReportWriter.Write(prOnly)).All(section =>
-            !section.Contains("closedBy", StringComparison.Ordinal)), "PR-only evidence must remain outside personal folds.");
+            !section.Contains("closedBy", StringComparison.Ordinal)), "PR-only person folds must not gain repeated PR audit fields.");
         Check(git with
         {
             Commits = [], PullRequests = [],
@@ -53,9 +54,8 @@ public static class PersonFoldingTests
 
         var incident = ReportWriterFixtures.IncidentSnapshot();
         var incidentSections = Sections(HtmlDetailedReportWriter.Write(incident));
-        Require(incidentSections.All(section => section.Contains("Created ICMs", StringComparison.Ordinal)
-            && section.Contains("Contributed ICMs", StringComparison.Ordinal)),
-            "Each incident fold must contain that person's complete closed, Created and Contributed details.");
+        Require(incidentSections.Length == 0,
+            "Teams Incident must omit the later personal evidence folds.");
         var namedActive = incident with
         {
             Request = incident.Request with
@@ -63,9 +63,11 @@ public static class PersonFoldingTests
                 Roster = incident.Request.Roster.SetItem(0, incident.Request.Roster[0] with { Name = "Active" })
             }
         };
-        Require(Sections(HtmlDetailedReportWriter.Write(namedActive)).Any(section =>
-            Text(section).Contains("Active", StringComparison.Ordinal) && section.Contains("Created ICMs", StringComparison.Ordinal)),
-            "A person named Active must still fold; global versus personal sections cannot be guessed from display text.");
+        Require(ReportFoldMarkup.Parse(HtmlDetailedReportWriter.Write(namedActive))
+            .Any(fold => fold.Kind == "owner" && fold.ParentStart is null
+                && Text(fold.Content).Contains("Active", StringComparison.Ordinal)
+                && fold.Content.Contains("Distinct closed incidents in group", StringComparison.Ordinal)),
+            "A person named Active must retain their earlier individual fold, independent of the global Active statistics.");
     }
 
     private static void Check(ReportSnapshot snapshot)
@@ -73,7 +75,7 @@ public static class PersonFoldingTests
         var document = ReportDocumentBuilder.Build(snapshot);
         var html = HtmlDetailedReportWriter.Write(document);
         var sections = Sections(html);
-        Require(sections.Length > 0 && ReportFoldMarkup.Parse(html)
+        Require((snapshot.Request.Analysis == "incidentManagement" ? sections.Length == 0 : sections.Length > 0) && ReportFoldMarkup.Parse(html)
             .Where(fold => fold.Kind == "person").All(fold => fold.ParentStart is null),
             "Every person fold must be complete, independent, initially collapsed and non-nested.");
         foreach (var section in sections)
@@ -96,12 +98,14 @@ public static class PersonFoldingTests
             "Roster and captured input context must remain outside the folds.");
         if (snapshot.Request.Analysis == "incidentManagement")
             Require(outside.Contains("<h3>Active</h3>", StringComparison.Ordinal)
-                && outside.Contains("Recorded incident action history and contribution evidence", StringComparison.Ordinal),
-                "Global Active incidents and complete action evidence must not become hidden inside a user's fold.");
+                && outside.Contains("Distinct incident totals and weighted duration statistics", StringComparison.Ordinal)
+                && !Regex.IsMatch(outside, @"<th\b[^>]*>\s*Action ID\s*</th>"),
+                "Global Active and overall statistics remain outside personal folds; action tables belong only to member evidence.");
         if (snapshot.Request.Analysis == "gitCommits")
             Require(outside.Contains("Distinct Git totals", StringComparison.Ordinal)
-                && outside.Contains(snapshot.AllSourcesSkipped ? "No selected source could be collected" : "Completed PR evidence", StringComparison.Ordinal),
-                "Git totals and PR evidence must remain global.");
+                && outside.Contains(snapshot.AllSourcesSkipped ? "No selected source could be collected" : "Git commit trends", StringComparison.Ordinal)
+                && !html.Contains("Completed PR evidence", StringComparison.Ordinal),
+                "Git totals and trends must remain global without the redundant completed-PR evidence section.");
         using var stream = new StringWriter();
         HtmlDetailedReportWriter.WriteTo(document, stream);
         Require(stream.ToString() == html, "Streamed and buffered exports must preserve identical folding and content.");

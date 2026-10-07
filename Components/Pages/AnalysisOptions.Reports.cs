@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using ProductivityInsights.Models.FeatureRegistry;
 using ProductivityInsights.Models.Reports;
 using ProductivityInsights.Models.Teams;
 using ProductivityInsights.Services.Reports;
@@ -41,17 +42,18 @@ public partial class AnalysisOptions
     private string? reportExportError;
     private string reportExportProgress = "";
 
-    private bool CanExportReports => !reportDisposed && !isLoadingResults && !isExportingReports
+    private bool CanExportReports => !reportDisposed && !IsDisplayedAnalysisLoading && !isExportingReports
         && !string.IsNullOrEmpty(analysisResultHtml)
         && displayedExportRun is { Completed: true } run
         && run.Request.Analysis == selectedOption && run.Request.View == selectedView
-        && (selectedView != "trends" || selectedOption == "gitCommits");
+        && (selectedView != "trends" || selectedOption == "gitCommits" || IsFeatureRegistrySelected);
 
     private string SuggestedReportFileName => CanExportReports && displayedExportRun is { } run
         ? ReportArchiveBuilder.GetFileName(run.Request) : "";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await ScrollFeatureRegistryResultsAsync();
         if (reportDisposed || reportPickerInitializationFailed || string.IsNullOrEmpty(analysisResultHtml))
             return;
         try
@@ -151,6 +153,10 @@ public partial class AnalysisOptions
             else
                 AddSource(selectedOrganization, selectedProject, selectedGitRepository, selectedTargetBranch);
         }
+        else if (IsFeatureRegistrySelected)
+        {
+            AddSource("msdata", "A365", FeatureRegistrySource.Repository);
+        }
         else
         {
             foreach (var team in selectedView == "teams" ? selectedOwningTeams : [selectedOwningTeam])
@@ -181,9 +187,11 @@ public partial class AnalysisOptions
             }
         }
 
-        var start = startDateTime ?? (selectedOption == "incidentManagement" ? DateTime.UnixEpoch : now.UtcDateTime.AddDays(-30));
-        var end = endDateTime ?? now.UtcDateTime;
-        if (selectedOption == "gitCommits")
+        var requestedStart = IsFeatureRegistrySelected ? featureRegistryStart : startDateTime;
+        var requestedEnd = IsFeatureRegistrySelected ? featureRegistryEnd : endDateTime;
+        var start = requestedStart ?? (selectedOption == "incidentManagement" ? DateTime.UnixEpoch : now.UtcDateTime.AddDays(-30));
+        var end = requestedEnd ?? now.UtcDateTime;
+        if (selectedOption == "gitCommits" || IsFeatureRegistrySelected)
         {
             start = start.AddTicks(-(start.Ticks % TimeSpan.TicksPerMillisecond));
             end = end.AddTicks(-(end.Ticks % TimeSpan.TicksPerMillisecond));
@@ -196,16 +204,18 @@ public partial class AnalysisOptions
             ? DateTime.SpecifyKind(end, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture)
             : end.ToString(dateFormat, CultureInfo.CurrentCulture);
         var boundsOrigin = "Explicit inputs captured at confirmation; original wall-clock fields are retained without time-zone conversion.";
-        if (!startDateTime.HasValue || !endDateTime.HasValue)
+        if (!requestedStart.HasValue || !requestedEnd.HasValue)
         {
             var defaults = new List<string>();
-            if (!startDateTime.HasValue)
+            if (!requestedStart.HasValue)
                 defaults.Add(selectedOption == "incidentManagement"
                     ? "Missing start uses the fixed UnixEpoch default."
                     : "Missing start uses the 30-day export default anchored at confirmation.");
-            if (!endDateTime.HasValue)
+            if (!requestedEnd.HasValue)
                 defaults.Add("Missing end uses the export capture timestamp.");
-            defaults.Add("Unchanged analysis APIs evaluate time-dependent defaults independently; capture does not observe their earlier calls.");
+            defaults.Add(IsFeatureRegistrySelected
+                ? "Feature Registry uses these captured defaults for both analysis and export."
+                : "Unchanged analysis APIs evaluate time-dependent defaults independently; capture does not observe their earlier calls.");
             boundsOrigin = string.Join(" ", defaults);
         }
         return new ReportRequest
@@ -214,8 +224,8 @@ public partial class AnalysisOptions
             Analysis = selectedOption,
             View = selectedView,
             ExecutedAt = now,
-            RequestedStart = startDateTime,
-            RequestedEnd = endDateTime,
+            RequestedStart = requestedStart,
+            RequestedEnd = requestedEnd,
             Start = new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Utc)),
             End = new DateTimeOffset(DateTime.SpecifyKind(end, DateTimeKind.Utc)),
             TimeZone = selectedOption == "workItems" ? "Date-only WIQL literals (no time-zone conversion)" : "UTC wall-clock (legacy API semantics)",
@@ -224,9 +234,9 @@ public partial class AnalysisOptions
             EffectiveBoundsOrigin = boundsOrigin,
             Sources = sources.ToImmutable(),
             Roster = roster.ToImmutable(),
-            RosterParentIndices = selectedOption is "incidentManagement" or "gitCommits" or "workItems" ? rosterParents.ToImmutable() : [],
+            RosterParentIndices = selectedOption is "incidentManagement" or "gitCommits" or "workItems" or "featureRegistry" ? rosterParents.ToImmutable() : [],
             Manager = selectedView == "teams" ? selectedManager?.displayName : null,
-            TrendPeriod = selectedTrendPeriod
+            TrendPeriod = IsFeatureRegistrySelected ? "daily" : selectedTrendPeriod
         };
     }
 
@@ -332,6 +342,12 @@ public partial class AnalysisOptions
 
             reportExportProgress = run.Request.Analysis == "incidentManagement" && run.Request.IsTeams
                 ? "Collecting available incident report data..." : "Collecting complete report data...";
+            if (run.Request.Analysis == FeatureRegistrySource.Analysis)
+            {
+                reportExportProgress = "Preparing the captured Feature Registry PR snapshot...";
+                if (run.Snapshot is null)
+                    throw new InvalidOperationException("Run Feature Registry analysis again; its PR snapshot is unavailable and export will not requery.");
+            }
             StateHasChanged();
             var snapshot = run.Snapshot ?? await Task.Run(
                 () => ReportCollector.CollectAsync(run.Request, progress, token), token);

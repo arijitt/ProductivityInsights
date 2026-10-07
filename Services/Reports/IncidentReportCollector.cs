@@ -60,9 +60,12 @@ public sealed class IncidentReportCollector : IReportCollector, IDisposable
 
         var incidents = ImmutableArray.CreateBuilder<IncidentReportRecord>();
         var actions = ImmutableArray.CreateBuilder<IncidentActionReportRecord>();
-        foreach (var team in teams)
+        for (var index = 0; index < teams.Length; index++)
         {
-            progress?.Report(request.IsTeams ? "Collecting available ICM incidents and recorded actions"
+            cancellationToken.ThrowIfCancellationRequested();
+            var team = teams[index];
+            var queue = $"(queue {index + 1} of {teams.Length}): {team}";
+            progress?.Report(request.IsTeams ? $"Collecting available ICM incidents {queue}"
                 : "Collecting complete scoped ICM incidents and recorded actions");
             var parameters = new Dictionary<string, object>
             {
@@ -73,6 +76,7 @@ public sealed class IncidentReportCollector : IReportCollector, IDisposable
                 ["rowLimit"] = MaximumRowsPerQuery + 1
             }.ToImmutableDictionary();
             var incidentResult = await ExecuteAsync(new(IncidentQuery, false, parameters), cancellationToken);
+            if (request.IsTeams) progress?.Report($"Collecting recorded ICM actions {queue}");
             var actionResult = await ExecuteAsync(new(ActionQuery, false, parameters), cancellationToken);
             var scoped = new Dictionary<string, IncidentReportRecord>(StringComparer.Ordinal);
             foreach (var row in incidentResult.Rows)

@@ -7,8 +7,8 @@ namespace ProductivityInsights.Services.Reports;
 internal sealed class IncidentReportPresentation
 {
     public sealed record SourceGroup(ImmutableArray<string> SourceKeys, ImmutableArray<IncidentDocument> Incidents);
-    public sealed record ContributedIncident(IncidentDocument Incident, ImmutableArray<ReportEntity<IncidentActionReportRecord>> Actions);
-    public sealed record MemberActivityDetails(ImmutableArray<IncidentDocument> Created, ImmutableArray<ContributedIncident> Contributed);
+    public sealed record OwnerGroup(string OwningContact, ImmutableArray<IncidentDocument> Incidents);
+    public sealed record ContributionGroup(string? ContributorKey, string Contributor, ImmutableArray<IncidentDocument> Incidents);
 
     private readonly ReportDocument document;
     private readonly CancellationToken token;
@@ -71,38 +71,17 @@ internal sealed class IncidentReportPresentation
     public string Contributor(ReportSummaryRow row) => names.GetValueOrDefault(row.ContributorKey, row.Contributor);
     public string Path(ReportSummaryRow row) => row.SourceKey is null ? "\u2014" : sources[row.SourceKey].Label;
     public string MemberKey(ReportIdentity identity) => catalog.Get(identity).Key;
+    public string OwningContact(ReportIdentity identity) => names[MemberKey(identity)];
 
-    public ImmutableDictionary<string, MemberActivityDetails> MemberActivityDetailsByKey()
+    public ImmutableDictionary<string, IncidentContributorGroup> ClosedGroupsByMemberKey()
     {
-        token.ThrowIfCancellationRequested();
-        var incidents = document.Incidents.ToDictionary(item => item.Entity.Record.EntityKey, StringComparer.Ordinal);
-        var created = document.Incidents.Where(item => item.Entity.Record.Created)
-            .ToLookup(item => MemberKey(item.Entity.Record.Owner), StringComparer.Ordinal);
-        var contributions = new Dictionary<string, ImmutableArray<ContributedIncident>>(StringComparer.Ordinal);
-        foreach (var member in document.IncidentActions.GroupBy(action => MemberKey(action.Record.Actor), StringComparer.Ordinal))
+        var result = ImmutableDictionary.CreateBuilder<string, IncidentContributorGroup>(StringComparer.Ordinal);
+        foreach (var group in document.IncidentGroups.Skip(1))
         {
             token.ThrowIfCancellationRequested();
-            var items = ImmutableArray.CreateBuilder<ContributedIncident>();
-            foreach (var group in member.GroupBy(action =>
-            {
-                token.ThrowIfCancellationRequested();
-                return action.Record.IncidentKey;
-            }, StringComparer.Ordinal))
-            {
-                token.ThrowIfCancellationRequested();
-                items.Add(new(incidents[group.Key], group.ToImmutableArray()));
-            }
-            contributions.Add(member.Key, items.ToImmutable());
-        }
-        var result = ImmutableDictionary.CreateBuilder<string, MemberActivityDetails>(StringComparer.Ordinal);
-        foreach (var member in document.OverallRows)
-        {
-            token.ThrowIfCancellationRequested();
-            var memberCreated = created[member.ContributorKey].ToImmutableArray();
-            var memberContributed = contributions.GetValueOrDefault(member.ContributorKey, []);
-            if (memberCreated.Length != member.Created || memberContributed.Length != member.Contributed)
-                throw new InvalidOperationException("Incident member Created/Contributed details do not match the report's contributor totals.");
-            result.Add(member.ContributorKey, new(memberCreated, memberContributed));
+            var record = group.Incidents[0].Entity.Record;
+            var actor = record.ResolvedAt is not null ? record.ResolvedBy : record.MitigatedBy;
+            result.Add(MemberKey(actor), group);
         }
         return result.ToImmutable();
     }
@@ -142,9 +121,54 @@ internal sealed class IncidentReportPresentation
     public string SourceCaption(ImmutableArray<string> keys) =>
         ReportFormatting.Join("; ", keys.OrderBy(key => sourceOrder[key]).Select(key => sources[key].Label), token);
 
-    public ImmutableArray<string> Contributors(IncidentDocument incident) => actions[incident.Entity.Record.EntityKey]
-        .Select(action => catalog.Get(action.Record.Actor).Key).Distinct(StringComparer.Ordinal)
+    public IEnumerable<OwnerGroup> OwnerGroups(ImmutableArray<IncidentDocument> incidents)
+    {
+        foreach (var group in incidents.GroupBy(item => MemberKey(item.Entity.Record.Owner), StringComparer.Ordinal)
+            .OrderBy(group => OwningContact(group.First().Entity.Record.Owner), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.Key, StringComparer.Ordinal))
+        {
+            token.ThrowIfCancellationRequested();
+            yield return new(OwningContact(group.First().Entity.Record.Owner), group.ToImmutableArray());
+        }
+    }
+
+    public ImmutableArray<string> Contributors(IncidentDocument incident) => ContributorKeys(incident)
         .Select(key => names[key]).Order(StringComparer.Ordinal).ToImmutableArray();
+
+    public IEnumerable<ContributionGroup> ContributionGroups(ImmutableArray<IncidentDocument> incidents)
+    {
+        var byContributor = new Dictionary<string, ImmutableArray<IncidentDocument>.Builder>(StringComparer.Ordinal);
+        var withoutEvidence = ImmutableArray.CreateBuilder<IncidentDocument>();
+        foreach (var incident in incidents)
+        {
+            token.ThrowIfCancellationRequested();
+            var recorded = false;
+            foreach (var key in ContributorKeys(incident))
+            {
+                token.ThrowIfCancellationRequested();
+                recorded = true;
+                if (!byContributor.TryGetValue(key, out var items))
+                    byContributor.Add(key, items = ImmutableArray.CreateBuilder<IncidentDocument>());
+                items.Add(incident);
+            }
+            if (!recorded) withoutEvidence.Add(incident);
+        }
+        foreach (var group in byContributor.OrderBy(group => names[group.Key], StringComparer.Ordinal)
+            .ThenBy(group => group.Key, StringComparer.Ordinal))
+        {
+            token.ThrowIfCancellationRequested();
+            yield return new(group.Key, names[group.Key], group.Value.ToImmutable());
+        }
+        if (withoutEvidence.Count != 0)
+            yield return new(null, "No recorded in-period contributors", withoutEvidence.ToImmutable());
+    }
+
+    private IEnumerable<string> ContributorKeys(IncidentDocument incident) => actions[incident.Entity.Record.EntityKey]
+        .Select(action =>
+        {
+            token.ThrowIfCancellationRequested();
+            return MemberKey(action.Record.Actor);
+        }).Distinct(StringComparer.Ordinal);
 
     public static string Date(DateTimeOffset? value) => value?.ToString("M/d/yyyy h:mm:ss tt", CultureInfo.InvariantCulture) ?? "-";
 

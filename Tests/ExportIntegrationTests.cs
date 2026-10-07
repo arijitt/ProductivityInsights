@@ -53,7 +53,10 @@ public static class ExportIntegrationTests
             var detailedEntry = zip.Entries.Single(entry => entry.Name.EndsWith("_Detailed.html"));
             var htmlEntry = zip.Entries.Single(entry => !entry.Name.EndsWith("_Detailed.html"));
             var stem = Path.GetFileNameWithoutExtension(htmlEntry.Name);
-            CompatibilityTests.Require(detailedEntry.Name == stem + "_Detailed.html", "Detailed HTML naming changed the report stem.");
+            CompatibilityTests.Require(stem == $"Git_Commits_teams_{captured.Start:yyyyMMdd}_to_{captured.End:yyyyMMdd}"
+                && detailedEntry.Name == stem + "_Detailed.html"
+                && archive.FileName == $"{stem}_{captured.RunId:N}.zip",
+                "HTML entry names must omit the GUID while the run-specific ZIP and Save As suggestion retain it.");
             using var detailedReader = new StreamReader(detailedEntry.Open());
             using var htmlReader = new StreamReader(htmlEntry.Open());
             var detailed = detailedReader.ReadToEnd();
@@ -127,6 +130,7 @@ public static class ExportIntegrationTests
             Reports = [new OrgMember { Id = "example-member", DisplayName = "Example Contributor", Mail = "dev@example.test" }]
         });
         Set(component, "selectedGitCommitCombinations", new List<string> { "msdata : A365 : BBC-VHD : master" });
+        Set(component, "selectedTeamCombinations", new List<string> { "msdata : A365 : Cosmos on Azure Job Service : A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure" });
         Set(component, "selectedOwningTeams", new List<string> { "AZURESYNAPSEJOBSERVICE\\JobPlatform" });
         Set(component, "startDateTime", new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
         Set(component, "endDateTime", new DateTime(2026, 7, 31, 23, 59, 59, DateTimeKind.Utc));

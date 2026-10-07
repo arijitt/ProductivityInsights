@@ -13,12 +13,18 @@ internal sealed class DetailedReportNavigation
     private readonly ReportIdentityCatalog identities;
     private readonly Dictionary<string, string> memberReferences = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> sourceReferences = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> incidentReferences = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ReportSource> sources;
     private readonly Dictionary<string, string> teamSources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> destinations = new(StringComparer.Ordinal);
     private readonly List<(int Position, string Id)> targets = [];
     private readonly List<(int Start, int End)> personSections = [];
     private readonly List<(int Start, int End)> itemSections = [];
+    private readonly Dictionary<int, ReadOnlyMemory<char>> itemHeadingTitles = [];
+    private readonly List<(int Start, int End)> contextSections = [];
+    private readonly List<(int Start, int End)> queueSections = [];
+    private readonly List<(int Start, int End)> ownerSections = [];
+    private readonly List<(int Position, ReadOnlyMemory<char> Title, int Level)> recordHeadings = [];
     private int? rosterHierarchyPosition;
 
     internal DetailedReportNavigation(ReportDocument document, CancellationToken token)
@@ -31,6 +37,11 @@ internal sealed class DetailedReportNavigation
             memberReferences.TryAdd(identities.Get(member).Key, $"#report-member-reference-{memberReferences.Count}");
         if (request.Analysis == "incidentManagement")
         {
+            foreach (var incident in document.Incidents)
+            {
+                token.ThrowIfCancellationRequested();
+                incidentReferences.Add(incident.Entity.Record.EntityKey, $"#report-incident-reference-{incidentReferences.Count}");
+            }
             foreach (var source in request.Sources)
             {
                 token.ThrowIfCancellationRequested();
@@ -50,11 +61,22 @@ internal sealed class DetailedReportNavigation
     {
         if (request.IsTeams) personSections.Add((start, end));
     }
-    internal void ItemSection(int start, int end)
+    internal void ItemSection(int start, int end, ReadOnlyMemory<char>? headingTitle = null)
     {
-        if (request.IsTeams) itemSections.Add((start, end));
+        if (request.IsTeams)
+        {
+            itemSections.Add((start, end));
+            if (headingTitle is { } title) itemHeadingTitles.Add(start, title);
+        }
     }
+    internal void ContextSection(int start, int end) => contextSections.Add((start, end));
+    internal void QueueSection(int start, int end) => queueSections.Add((start, end));
+    internal void OwnerSection(int start, int end) => ownerSections.Add((start, end));
+    internal void RecordHeading(int position, ReadOnlyMemory<char> title, int level) => recordHeadings.Add((position, title, level));
     internal string? SourceLink(string? key) => key is null ? null : sourceReferences.GetValueOrDefault(key);
+    internal string IncidentLink(IncidentDocument incident) => incidentReferences[incident.Entity.Record.EntityKey];
+    internal void IncidentSection(int position, IncidentDocument incident) =>
+        Target(position, [IncidentLink(incident)], "incident");
 
     internal string? PathLink(string path, IEnumerable<string>? sourceKeys = null)
     {
@@ -113,8 +135,22 @@ internal sealed class DetailedReportNavigation
                 blocks.Add(block);
         }
         blocks.Sort((left, right) => left.Span.Start.CompareTo(right.Span.Start));
-        ApplySections(body, personSections, person: true);
-        ApplySections(body, itemSections, person: false);
+        ApplySections(body, personSections, DetailedReportPresentation.PersonSectionStartKey, DetailedReportPresentation.PersonSectionEndKey, 3);
+        ApplySections(body, itemSections, DetailedReportPresentation.ItemSectionStartKey, DetailedReportPresentation.ItemSectionEndKey, 4, 5);
+        ApplySections(body, contextSections, DetailedReportPresentation.ContextSectionStartKey, DetailedReportPresentation.ContextSectionEndKey, 2);
+        ApplySections(body, queueSections, DetailedReportPresentation.QueueSectionStartKey, DetailedReportPresentation.QueueSectionEndKey, 4);
+        ApplySections(body, ownerSections, DetailedReportPresentation.OwnerSectionStartKey, DetailedReportPresentation.OwnerSectionEndKey, 3, 5);
+        var headingIndex = 0;
+        foreach (var heading in recordHeadings)
+        {
+            token.ThrowIfCancellationRequested();
+            while (headingIndex < body.Count && body[headingIndex].Span.Start < heading.Position) headingIndex++;
+            if (headingIndex == body.Count || body[headingIndex].Span.Start > heading.Position + 1
+                || body[headingIndex] is not ParagraphBlock)
+                throw new InvalidOperationException("The detailed report could not locate a recorded incident heading.");
+            body[headingIndex].SetData(DetailedReportPresentation.ItemHeadingTitleKey, heading.Title);
+            body[headingIndex].SetData(DetailedReportPresentation.RecordHeadingLevelKey, heading.Level);
+        }
         if (rosterHierarchyPosition is { } position)
         {
             var roster = blocks.OfType<ParagraphBlock>().SingleOrDefault(block => block.Span.Start == position)
@@ -142,11 +178,13 @@ internal sealed class DetailedReportNavigation
                 throw new InvalidOperationException("The detailed report contains an unresolved navigation link.");
             link.Url = "#" + id;
             link.GetAttributes().AddClass(reference.StartsWith("#report-member-", StringComparison.Ordinal)
-                ? "report-member-link" : "report-icm-link");
+                ? "report-member-link" : reference.StartsWith("#report-incident-", StringComparison.Ordinal)
+                    ? "report-incident-link" : "report-icm-link");
         }
     }
 
-    private void ApplySections(MarkdownDocument body, List<(int Start, int End)> sections, bool person)
+    private void ApplySections(MarkdownDocument body, List<(int Start, int End)> sections,
+        object startKey, object endKey, params int[] headingLevels)
     {
         var index = 0;
         foreach (var section in sections)
@@ -155,16 +193,19 @@ internal sealed class DetailedReportNavigation
             while (index < body.Count && body[index].Span.Start < section.Start) index++;
             if (index == body.Count || body[index].Span.Start > section.Start + 1
                 || !(body[index] is ParagraphBlock || body[index] is HeadingBlock heading
-                    && (person ? heading.Level == 3 : heading.Level is 4 or 5)))
+                    && headingLevels.Contains(heading.Level)))
                 throw new InvalidOperationException("The detailed report could not locate a folding section heading.");
-            body[index].SetData(person ? DetailedReportPresentation.PersonSectionStartKey : DetailedReportPresentation.ItemSectionStartKey, true);
-            if (!person && body[index] is ParagraphBlock && index + 1 < body.Count
+            body[index].SetData(startKey, true);
+            if (startKey == DetailedReportPresentation.ItemSectionStartKey
+                && itemHeadingTitles.TryGetValue(section.Start, out var title))
+                body[index].SetData(DetailedReportPresentation.ItemHeadingTitleKey, title);
+            if (startKey == DetailedReportPresentation.ItemSectionStartKey && body[index] is ParagraphBlock && index + 1 < body.Count
                 && body[index + 1] is ParagraphBlock && body[index + 1].Span.Start < section.End)
                 body[index + 1].SetData(DetailedReportPresentation.ItemFieldsKey, true);
             while (index + 1 < body.Count && body[index + 1].Span.Start < section.End) index++;
             if (body[index].Span.End >= section.End)
                 throw new InvalidOperationException("The detailed report could not preserve a folding section boundary.");
-            body[index].SetData(person ? DetailedReportPresentation.PersonSectionEndKey : DetailedReportPresentation.ItemSectionEndKey, true);
+            body[index].SetData(endKey, true);
             index++;
         }
     }

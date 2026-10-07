@@ -130,6 +130,7 @@ public sealed record ReportSkippedSource(string SourceKey, string Reason);
 
 public sealed record ReportSnapshot
 {
+    public ProductivityInsights.Models.FeatureRegistry.FeatureRegistrySnapshot? FeatureRegistry { get; init; }
     public required ReportRequest Request { get; init; }
     public required DateTimeOffset AsOf { get; init; }
     public ImmutableArray<WorkItemReportRecord> WorkItems { get; init; } = [];

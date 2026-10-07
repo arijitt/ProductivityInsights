@@ -10,7 +10,7 @@ public static class ReportArchiveBuilder
 {
     public const long MaximumReportBytes = 2L * ReportRenderingLimits.MaximumExportFileBytes;
 
-    public static string GetFileName(ReportRequest request) => GetStem(request) + ".zip";
+    public static string GetFileName(ReportRequest request) => $"{GetStem(request)}_{request.RunId:N}.zip";
 
     private static string GetStem(ReportRequest request)
     {
@@ -19,13 +19,14 @@ public static class ReportArchiveBuilder
         {
             "workItems" => "Work_Items",
             "gitCommits" => "Git_Commits",
+            "featureRegistry" => "Feature_Registry",
             "incidentManagement" => "Incident_Resolutions",
             _ => throw new InvalidOperationException("Unsupported report analysis.")
         };
         if (request.View is not ("details" or "teams" or "trends")
-            || request.View == "trends" && request.Analysis != "gitCommits")
+            || request.View == "trends" && request.Analysis is not ("gitCommits" or "featureRegistry"))
             throw new InvalidOperationException("This view has no supported report data.");
-        return $"{analysis}_{scope}_{request.Start:yyyyMMdd}_to_{request.End:yyyyMMdd}_{request.RunId:N}";
+        return $"{analysis}_{scope}_{request.Start:yyyyMMdd}_to_{request.End:yyyyMMdd}";
     }
 
     public static ReportArchive Build(ReportSnapshot snapshot, CancellationToken cancellationToken = default)
@@ -46,7 +47,7 @@ public static class ReportArchiveBuilder
             }
             cancellationToken.ThrowIfCancellationRequested();
             stream.Position = 0;
-            return new ReportArchive(stem + ".zip", stream);
+            return new ReportArchive(GetFileName(snapshot.Request), stream);
         }
         catch
         {

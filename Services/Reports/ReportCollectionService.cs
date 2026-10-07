@@ -9,6 +9,8 @@ public sealed class ReportCollectionService(
         ReportRequest request, IProgress<string>? progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Analysis == Models.FeatureRegistry.FeatureRegistrySource.Analysis)
+            throw new InvalidOperationException("Feature Registry export requires the successful Run Analysis snapshot; it cannot requery.");
         cancellationToken.ThrowIfCancellationRequested();
         if (request.Sources.IsDefaultOrEmpty || request.Sources.Any(source => string.IsNullOrWhiteSpace(source.Scope)))
             throw new InvalidOperationException("No valid sources were captured. Select sources and run the analysis again.");

@@ -27,6 +27,11 @@ builder.Services.AddOptions<IncidentManagementKustoOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<IncidentManagementMetrics>();
 builder.Services.AddReportExports(builder.Configuration);
+builder.Services.AddHttpClient("FeatureRegistry", client => client.Timeout = TimeSpan.FromMinutes(3));
+builder.Services.AddScoped<ProductivityInsights.Services.FeatureRegistry.IFeatureRegistryPullRequestCollector>(provider =>
+    new ProductivityInsights.Services.FeatureRegistry.FeatureRegistryPullRequestCollector(
+        provider.GetRequiredService<IHttpClientFactory>().CreateClient("FeatureRegistry"),
+        async token => (await ProductivityInsights.Utilities.UserToken.GetToken().WaitAsync(token)).Token));
 
 var app = builder.Build();
 

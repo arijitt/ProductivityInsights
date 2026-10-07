@@ -48,10 +48,9 @@ public static class ItemFoldingTests
         var items = folds.Where(fold => fold.Kind == "item").ToArray();
         var expected = snapshot.Request.Analysis switch
         {
-            "workItems" => document.WorkItems.Length * 2,
+            "workItems" => document.WorkItems.Length,
             "gitCommits" => document.Commits.Length,
-            _ => document.IncidentGroups.Skip(1).Sum(group => group.Incidents.Length)
-                + document.OverallRows.Sum(row => row.Created + row.Contributed)
+            _ => 0
         };
         Require(items.Length == expected, "Every personal record occurrence must have exactly one fold, without duplicate source memberships.");
         foreach (var item in items)
@@ -61,8 +60,8 @@ public static class ItemFoldingTests
                 && Regex.IsMatch(item.Content, @"^\s*<summary>\s*<h[45]\b[^>]*>.+?</h[45]>\s*</summary>\s*<div class=""report-item-content"">", RegexOptions.Singleline)
                 && !Regex.IsMatch(item.Content, @"<h[123]\b"),
                 "Each item needs a complete heading/body disclosure directly inside its own person, never adjacent people or global sections.");
-            Require(item.Content.Contains("Recorded URL:", StringComparison.Ordinal),
-                "An item's recorded URL must remain within its fold.");
+            Require(item.Content.Contains(snapshot.Request.Analysis == "incidentManagement" ? "report-incident-link" : "Recorded URL:", StringComparison.Ordinal),
+                "Each fold retains a working reference to its incident record or the original recorded URL for other analyses.");
         }
         Require(!ReportFoldMarkup.OutsidePersons(html).Contains("<details class=\"report-item-details\"", StringComparison.Ordinal)
             && !Regex.IsMatch(html, @"<(?:script|iframe|img)\b", RegexOptions.IgnoreCase),
@@ -70,11 +69,11 @@ public static class ItemFoldingTests
         if (snapshot.Request.Analysis == "workItems")
         {
             Require(items.All(item => Text(item.Content).Contains("State Change History", StringComparison.OrdinalIgnoreCase)),
-                "Both work-item locations must fold their complete histories with the record.");
+                "Each work-item fold must contain its complete history.");
             foreach (var record in document.WorkItems.Select(item => item.Entity.Record))
-                Require(items.Any(item => Text(item.Content).Contains("Work item " + record.Organization + ":" + record.Id, StringComparison.Ordinal)
+                Require(items.Any(item => Text(item.Content).Contains("Source-qualified key: " + record.EntityKey, StringComparison.Ordinal)
                     && Text(item.Content).Contains(record.Title, StringComparison.Ordinal)),
-                    "Work-item audit folds must retain their source-qualified identity and exact title.");
+                    "Consolidated work-item folds must retain their source-qualified audit identity and exact title.");
         }
         else if (snapshot.Request.Analysis == "gitCommits")
         {
@@ -85,16 +84,8 @@ public static class ItemFoldingTests
                     "Each commit fold must include its full message, metadata and every changed file.");
         }
         else
-        {
-            foreach (var item in items)
-                Require(item.Content.Contains("Visible incident metadata", StringComparison.Ordinal)
-                    && item.Content.Contains("Mitigation text", StringComparison.Ordinal),
-                    "Every personal incident occurrence must retain its metadata and mitigation text.");
-            var contributed = items.Where(item => item.Content.Contains("Recorded in-period actions by this member", StringComparison.Ordinal)).ToArray();
-            Require(contributed.Length == document.OverallRows.Sum(row => row.Contributed)
-                && contributed.All(item => item.Content.Contains("Action ID", StringComparison.Ordinal)),
-                "Contributed incident folds must include their member-specific action evidence, not leave it outside the fold.");
-        }
+            Require(!html.Contains("Recorded in-period actions by this member", StringComparison.Ordinal),
+                "The removed later incident sections must not leave orphaned action-evidence folds.");
         using var output = new StringWriter();
         HtmlDetailedReportWriter.WriteTo(document, output);
         Require(output.ToString() == html, "Streaming must preserve every nested fold and record.");

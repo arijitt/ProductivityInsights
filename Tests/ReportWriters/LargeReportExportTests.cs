@@ -75,7 +75,7 @@ public static class LargeReportExportTests
 
     private static void ArchiveAbovePreviousLimits()
     {
-        const int incidentCount = 14;
+        const int incidentCount = 36;
         const int textLength = 700_000;
         var snapshot = Snapshot(incidentCount, "\nBEGIN-LARGE\n" + new string('\u4e00', textLength) + "\nEND-LARGE\n");
         var before = GC.GetAllocatedBytesForCurrentThread();
@@ -106,13 +106,13 @@ public static class LargeReportExportTests
                 var window = tail + new string(buffer, 0, length);
                 starts += Occurrences(window, "BEGIN-LARGE", tail.Length);
                 ends += Occurrences(window, "END-LARGE", tail.Length);
-                lastIncident |= window.Contains("Incident silo-a:113", StringComparison.Ordinal);
+                lastIncident |= window.Contains("silo-a:135", StringComparison.Ordinal);
                 tail = window[^Math.Min(64, window.Length)..];
             }
-            Require(textCharacters == 3L * incidentCount * textLength
-                && starts == 3 * incidentCount && ends == starts && lastIncident
+            Require(textCharacters == (long)incidentCount * textLength
+                && starts == incidentCount && ends == starts && lastIncident
                 && tail.Contains("</html>", StringComparison.Ordinal),
-                "Every full mitigation must survive Active, Created and Contributed details, including the last record and document footer.");
+                "Every full mitigation must survive exactly once in the earlier category records, including the last record and document footer.");
             var summaryEntry = zip.Entries.Single(entry => entry != detail);
             using var summary = new StreamReader(summaryEntry.Open());
             Require(summary.ReadToEnd() == HtmlSummaryReportWriter.Write(ReportDocumentBuilder.Build(snapshot), detail.Name),
@@ -136,7 +136,11 @@ public static class LargeReportExportTests
         var snapshot = baseline with
         {
             Request = baseline.Request with { Roster = roster },
-            Incidents = baseline.Incidents.Select(incident => incident with { Owner = roster[0] }).ToImmutableArray(),
+            Incidents = baseline.Incidents.Select(incident => incident with
+            {
+                Owner = roster[0], Active = false, Created = false, Mitigated = false, Resolved = false,
+                Title = new string('x', 900_000), Mitigation = ""
+            }).ToImmutableArray(),
             IncidentActions = roster.SelectMany((member, memberIndex) => baseline.IncidentActions.Select(action => action with
             {
                 Actor = member, ActionId = $"{memberIndex}-{action.ActionId}"

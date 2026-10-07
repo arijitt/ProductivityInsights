@@ -8,6 +8,8 @@ public static class ReportDocumentBuilder
     public static ReportDocument Build(ReportSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.Request.Analysis == Models.FeatureRegistry.FeatureRegistrySource.Analysis || snapshot.FeatureRegistry is not null)
+            return FeatureRegistryReportPresentation.Build(snapshot, cancellationToken);
         var token = cancellationToken;
         token.ThrowIfCancellationRequested();
         var request = snapshot.Request;
@@ -525,7 +527,7 @@ public static class ReportDocumentBuilder
         return notes.ToImmutable();
     }
 
-    private static void Validate(ReportSnapshot snapshot, CancellationToken token)
+    internal static ReportInputBudget Validate(ReportSnapshot snapshot, CancellationToken token)
     {
         var budget = new ReportInputBudget(token);
         var request = snapshot.Request;
@@ -615,6 +617,7 @@ public static class ReportDocumentBuilder
                 || string.IsNullOrWhiteSpace(item.ActionType))
                 throw new InvalidOperationException("An incident action has incomplete source-qualified identity.");
         }
+        return budget;
     }
 
     private static void ValidateRosterHierarchy(ReportRequest request, CancellationToken token)

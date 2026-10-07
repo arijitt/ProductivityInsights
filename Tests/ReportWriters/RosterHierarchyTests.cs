@@ -80,10 +80,10 @@ public static class RosterHierarchyTests
                 && link is not null && link.Value.Contains(request.Roster[index].Email!, StringComparison.Ordinal),
                 "Rendered parent/report edges and member identities must match the captured tree exactly.");
             var target = (string?)link!.Attribute("href") ?? "";
-            var targetTag = analysis == "gitCommits" && index == 3 ? "tr" : "h3";
             Require(Regex.IsMatch(target, @"^#report-member-[0-9]+$")
-                && Regex.IsMatch(html, "<" + targetTag + @"\b[^>]*\bid=""" + Regex.Escape(target[1..]) + @"""[^>]*>"),
-                "Every member must keep its existing, resolved detail hyperlink.");
+                && Regex.IsMatch(html, (analysis == "incidentManagement" ? @"<(?:h3|tr)" : @"<h3")
+                    + @"\b[^>]*\bid=""" + Regex.Escape(target[1..]) + @"""[^>]*>"),
+                "Every member must retain a resolved individual or Incident overall-row hyperlink.");
         }
         if (analysis == "gitCommits")
             Require((string?)nodes[1].Element("span")!.Element("a")!.Attribute("href")

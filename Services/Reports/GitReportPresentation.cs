@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using ProductivityInsights.Models.Reports;
 
 namespace ProductivityInsights.Services.Reports;
@@ -15,7 +16,11 @@ internal sealed class GitReportPresentation
     private readonly HashSet<string> ambiguousRepositories;
     private readonly HashSet<string> multipleBranches;
     private readonly Dictionary<string, string> contributorNames;
+    private readonly Dictionary<string, PullRequestReportRecord> pullRequests;
     private readonly Dictionary<string, (string Author, string Committer)> contributorRoles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> rosterLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> detailOrder = new(StringComparer.Ordinal);
+    private readonly HashSet<string> commitParticipants = new(StringComparer.Ordinal);
 
     public GitReportPresentation(ReportDocument document, CancellationToken token)
     {
@@ -31,6 +36,7 @@ internal sealed class GitReportPresentation
             .Where(group => group.Select(source => source.Branch).Distinct(StringComparer.Ordinal).Skip(1).Any())
             .Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         contributorNames = ContributorNames(document);
+        pullRequests = document.PullRequests.ToDictionary(pr => pr.Record.EntityKey, pr => pr.Record, StringComparer.Ordinal);
         OverallRows = document.OverallRows.OrderByDescending(row => row.PullRequests)
             .ThenByDescending(row => row.Commits).ThenBy(Contributor, StringComparer.Ordinal)
             .ToImmutableArray();
@@ -75,6 +81,52 @@ internal sealed class GitReportPresentation
 
     public string Contributor(ReportSummaryRow row) => contributorNames[row.ContributorKey];
 
+    public IEnumerable<ReportSummaryRow> TeamsDetailRows()
+    {
+        var members = OverallRows.ToDictionary(row => row.ContributorKey, StringComparer.Ordinal);
+        foreach (var (key, label) in rosterLabels)
+        {
+            token.ThrowIfCancellationRequested();
+            // All-source failures have no summary rows; these detail-only placeholders never enter totals.
+            members.TryAdd(key, new ReportSummaryRow { ContributorKey = key, Contributor = label });
+        }
+        return members.Values.Where(row => row.Commits != 0
+            || rosterLabels.ContainsKey(row.ContributorKey) && !commitParticipants.Contains(row.ContributorKey))
+            .OrderBy(row => detailOrder[row.ContributorKey])
+            .ThenBy(row => contributorRoles.ContainsKey(row.ContributorKey))
+            .ThenByDescending(row => row.Commits).ThenByDescending(row => row.Added)
+            .ThenBy(Contributor, StringComparer.Ordinal);
+    }
+
+    public string PersonHeading(ReportSummaryRow row)
+    {
+        var name = ContributorForHtml(row);
+        if (!contributorRoles.ContainsKey(row.ContributorKey)) name = AuthorIcon + " " + name;
+        return $"{name}: {ReportFormatting.Number(row.Commits)} {(row.Commits == 0 || row.Commits == 1 ? "commit" : "commits")}";
+    }
+
+    public (int Id, ReadOnlyMemory<char> Title)? PullRequestForHeading(GitReportRecord commit)
+    {
+        token.ThrowIfCancellationRequested();
+        var subject = commit.Message.AsSpan();
+        var lineEnd = subject.IndexOfAny('\r', '\n');
+        if (lineEnd >= 0) subject = subject[..lineEnd];
+        const string prefix = "Merged PR ";
+        if (!subject.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var colon = subject.IndexOf(':');
+        if (colon <= prefix.Length
+            || !int.TryParse(subject[prefix.Length..colon], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            || id <= 0) return null;
+        var key = $"{commit.Organization.ToUpperInvariant()}:{commit.RepositoryId.ToUpperInvariant()}:{id}";
+        if (pullRequests.TryGetValue(key, out var pr) && !string.IsNullOrWhiteSpace(pr.Title))
+            return (id, pr.Title.AsMemory());
+        // A merge subject can name a PR excluded from completion attribution; use it only for display.
+        var title = subject[(colon + 1)..];
+        var leadingWhitespace = title.Length - title.TrimStart().Length;
+        title = title.Trim();
+        return title.IsEmpty ? null : (id, commit.Message.AsMemory(colon + 1 + leadingWhitespace, title.Length));
+    }
+
     public string[] SummaryCells(ReportSummaryRow row, bool bySource)
     {
         var cells = Cells(row, bySource);
@@ -97,6 +149,12 @@ internal sealed class GitReportPresentation
             new[] { commit.Entity.Record.Author, commit.Entity.Record.Committer }))
             .Concat(document.PullRequests.Select(pr => pr.Record.CompletedBy)).ToImmutableArray();
         var catalog = new ReportIdentityCatalog(request, identities, token);
+        for (var index = 0; index < request.Roster.Length; index++)
+        {
+            var member = catalog.Get(request.Roster[index]);
+            detailOrder.TryAdd(member.Key, index);
+            rosterLabels.TryAdd(member.Key, member.Label);
+        }
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
         var labels = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var identity in identities)
@@ -117,6 +175,11 @@ internal sealed class GitReportPresentation
             token.ThrowIfCancellationRequested();
             var author = catalog.Get(commit.Entity.Record.Author).Key;
             var committer = catalog.Get(commit.Entity.Record.Committer).Key;
+            commitParticipants.Add(author);
+            commitParticipants.Add(committer);
+            // Captured roster order is depth-first; a shared group appears at its first participant.
+            detailOrder[commit.ContributorKey] = Math.Min(detailOrder.GetValueOrDefault(author, int.MaxValue),
+                detailOrder.GetValueOrDefault(committer, int.MaxValue));
             if (author != committer)
             {
                 names[commit.ContributorKey] = $"Author: {names[author]} / Committer: {names[committer]}";
@@ -136,6 +199,7 @@ internal sealed class GitReportPresentation
                     ? (labels[pair.Author], labels[pair.Committer])
                     : (names[pair.Author], names[pair.Committer]);
         }
+        foreach (var key in rosterLabels.Keys) rows.TryAdd(key, names[key]);
         return rows;
     }
 
