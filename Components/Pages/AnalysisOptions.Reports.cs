@@ -139,19 +139,13 @@ public partial class AnalysisOptions
 
         if (selectedOption == "workItems")
         {
-            if (selectedView == "teams")
-                foreach (var (org, project, team, area) in ParseSelectedTeamCombinations())
-                    AddSource(org, project, area, team: team);
-            else
-                AddSource(selectedOrganization, selectedProject, selectedAreaPath, team: selectedTeam);
+            foreach (var (org, project, team, area) in ParseSelectedTeamCombinations())
+                AddSource(org, project, area, team: team);
         }
         else if (selectedOption == "gitCommits")
         {
-            if (selectedView == "teams")
-                foreach (var (org, project, repo, branch) in ParseSelectedGitCommitCombinations())
-                    AddSource(org, project, repo, branch);
-            else
-                AddSource(selectedOrganization, selectedProject, selectedGitRepository, selectedTargetBranch);
+            foreach (var (org, project, repo, branch) in ParseSelectedGitCommitCombinations())
+                AddSource(org, project, repo, branch);
         }
         else if (IsFeatureRegistrySelected)
         {
@@ -159,7 +153,7 @@ public partial class AnalysisOptions
         }
         else
         {
-            foreach (var team in selectedView == "teams" ? selectedOwningTeams : [selectedOwningTeam])
+            foreach (var team in SelectedIncidentSources)
                 AddSource("", "", team);
         }
 

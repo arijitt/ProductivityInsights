@@ -44,6 +44,7 @@ public static class CompatibilityTests
         value = value.Replace("\r\n", "\n");
         value = NormalizeFeatureRegistryHooks(value);
         value = NormalizeTeamsSelectionDefaults(value);
+        value = NormalizeWorkItemSourceSelections(value);
         value = RemoveRange(value, "    private string? TeamsManagerWarning =>",
             "    // ---- Teams view (manager org-tree) UI + handlers ----");
         value = value.Replace("        @if (TeamsManagerWarning is { } managerWarning)\n"
@@ -59,6 +60,7 @@ public static class CompatibilityTests
         value = RemoveRange(value, "    private async Task DownloadAsPdf()", "    private IncidentManagementRequest CaptureIncidentManagementRequest()");
         value = Regex.Replace(value,
             @"(?m)^[ \t]*(?:(?:Begin|Complete|Hide|Restore)ReportExportContext\([^\r\n]*\);|private bool isGeneratingPdf = false;)[ \t]*\n", "");
+        value = NormalizeMultiSourceSelection(value);
         return NormalizeLines(value);
     }
 
@@ -106,6 +108,82 @@ public static class CompatibilityTests
             "private List<string> selectedOwningTeams = new List<string>();")
         .Replace("    private void SyncSelectedTeamCombinations()\n    {\n        if (selectedView != \"teams\") return;\n",
             "    private void SyncSelectedTeamCombinations()\n    {\n");
+
+    private static string NormalizeWorkItemSourceSelections(string value) =>
+        value.Replace("            \"One Infra - CS\" => \"A365\\\\One Infra\\\\Cluster Service\",\n", "")
+        .Replace("        \"One Infra - CS\",\n", "")
+        .Replace("            \"One Infra - Foundations\" => \"A365\\\\Synapse Jobs Service\\\\BBC\\\\Foundations\",\n", "")
+        .Replace("        \"One Infra - Foundations\",\n", "")
+        .Replace("            \"One Infra - Reliability\" => \"A365\\\\One Infra\\\\Reliability\",\n", "")
+        .Replace("        \"One Infra - Reliability\",\n", "")
+        .Replace("        .Append(BuildTeamCombination(\"msdata\", \"A365\", \"One Infra - Foundations\", \"A365\\\\One Infra\\\\One Infra Foundations\"))\n", "")
+        .Replace("                                <option value=\"HDInsight\">HDInsight</option>",
+            "                                <!--<option value=\"HDInsight\">HDInsight</option>-->")
+        .Replace("@if (selectedProject == \"A365\" || selectedProject == \"HDInsight\")",
+            "@if (selectedProject == \"A365\")")
+        .Replace("@foreach (var team in teamOptions.Where(team => GetProjectForTeam(team) == selectedProject))",
+            "@foreach (var team in teamOptions)")
+        .Replace("                    <option value=\"HDInsight\\HDInsight on K8s\\Hilo Platform\" disabled=\"@(!IsAreaPathApplicable(\"HDInsight\\\\HDInsight on K8s\\\\Hilo Platform\"))\">HDInsight\\HDInsight on K8s\\Hilo Platform</option>\n", "")
+        .Replace("            selectedTeam = \"HDInsight on K8s\";\n            selectedAreaPath = GetAreaPathForTeam();\n", "")
+        .Replace("            \"HDInsight on K8s\" => \"HDInsight\\\\HDInsight on K8s\\\\Hilo Platform\",\n", "")
+        .Replace("            \"HDI Product Management\" => \"HDInsight\\\\HDI Product Management\",\n", "")
+        .Replace("            \"HDInsight Team\" => \"HDInsight\\\\Supportability\",\n", "")
+        .Replace("    private static string GetProjectForTeam(string team) =>\n"
+            + "        team is \"HDInsight on K8s\" or \"HDI Product Management\" or \"HDInsight Team\" ? \"HDInsight\" : \"A365\";\n", "")
+        .Replace("        \"Lakehouse Job Execution and Capacities\",\n        \"HDInsight on K8s\",\n        \"HDI Product Management\",\n        \"HDInsight Team\"\n",
+            "        \"Lakehouse Job Execution and Capacities\"\n")
+        .Replace(".Select(team => BuildTeamCombination(\"msdata\", GetProjectForTeam(team), team, GetAreaPathForTeam(team)))",
+            ".Select(team => BuildTeamCombination(\"msdata\", \"A365\", team, GetAreaPathForTeam(team)))");
+
+    private static string NormalizeMultiSourceSelection(string value)
+    {
+        foreach (var form in new[] { "RenderAnalysisForm", "RenderGitCommitsForm", "RenderIncidentResolutionsForm" })
+            value = RemoveRange(value, $"    private RenderFragment {form}()", "        <div class=\"datetime-group mb-4\">");
+        value = value.Replace("        RestoreSelectionResults(option, view);\n", "")
+            .Replace("            CacheTeamsSourceData();\n", "")
+            .Replace("            BeginIncidentSelection(incidentManagementRequest);\n", "")
+            .Replace("                        incidentSelectionError = incidentManagementResult.ErrorMessage;\n", "")
+            .Replace("                        incidentSelectionError = ex.Message;\n", "")
+            .Replace("            if (UsesSourceSelection) isLoadingResults = false;\n", "")
+            .Replace("HasSelectedSources && (selectedView != \"teams\" || (selectedManager != null && orgTreeRoot != null))",
+                "selectedView != \"teams\" || (selectedManager != null && orgTreeRoot != null)")
+            .Replace("bool teamsWorkItems = selectedOption == \"workItems\";", "bool teamsWorkItems = selectedView == \"teams\" && selectedOption == \"workItems\";")
+            .Replace("bool teamsGitCommits = selectedOption == \"gitCommits\";", "bool teamsGitCommits = selectedView == \"teams\" && selectedOption == \"gitCommits\";")
+            .Replace("if (selectedView == \"teams\") html.Append", "html.Append")
+            .Replace("(contributors.Any() || UsesSourceSelection && displayedSelectionResult is not null)", "contributors.Any()")
+            .Replace("        if (UsesSourceSelection)\n        {\n            await ConfirmSourceSelectionAsync();\n            return;\n        }\n", "")
+            .Replace("<text>Work Items Completion Summary across @SelectionSummary</text>",
+                "<text>Work Items Completion Summary for '@selectedOrganization\\@selectedProject\\@selectedAreaPath'</text>")
+            .Replace("<text>Code Contribution Summary across @SelectionSummary</text>",
+                "<text>Code Contribution Summary for '@selectedOrganization\\@selectedProject\\@selectedGitRepository\\@selectedTargetBranch' Branch</text>")
+            .Replace("<text>ICM Incidents Summary across @IncidentSelectionSummary</text>",
+                "<text>ICM Incidents Summary for '@selectedOwningTeam'</text>")
+            .Replace("Code Commit Trends — @(char.ToUpper(DisplayedTrendPeriod[0]) + DisplayedTrendPeriod.Substring(1)) across @SelectionSummary",
+                "Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\\@selectedProject\\@selectedGitRepository\\@selectedTargetBranch' Branch")
+            .Replace("                var detailVersion = analysisOperationVersion;\n", "")
+            .Replace("if (detailVersion == analysisOperationVersion) contributorDetails", "contributorDetails")
+            .Replace("                    if (detailVersion == analysisOperationVersion)\n                        contributorDetails", "                    contributorDetails")
+            .Replace("foreach (var combination in SelectedWorkItemSources)", "foreach (var combination in selectedTeamCombinations ?? Enumerable.Empty<string>())")
+            .Replace("foreach (var combination in SelectedGitSources)", "foreach (var combination in selectedGitCommitCombinations ?? Enumerable.Empty<string>())")
+            .Replace("workItemHistoryCollectionMap.TryGetValue(workItem,", "workItemHistoryCollectionMap.TryGetValue(workItemId,")
+            .Replace("GitCommitCollection gitCommitCollection, string? capturedPeriod = null", "GitCommitCollection gitCommitCollection")
+            .Replace("(capturedPeriod ?? selectedTrendPeriod)", "selectedTrendPeriod");
+        value = value.Replace("        var workItemHistoryCollectionMap = await GetSelectedWorkItemHistoryAsync(contributorWorkItems);",
+            """
+                    WorkItemQueryOptions workItemQueryOptions = GetWorkItemQueryOptions();
+
+                    Dictionary<int, WorkItemHistoryCollection> workItemHistoryCollectionMap =  await WorkItemCompletionMetrics.GetWorkItemHistoryCollectionAsync(
+                        workItemQueryOptions.OrganizationName,
+                        new WorkItemDetailsCollection() { count = contributorWorkItems.Count, value = contributorWorkItems});
+            """);
+        value = value.Replace("        if (UsesSourceSelection && displayedSelectionResult is { } selectionResult)\n"
+            + "        {\n            gitCommitCollection = await SelectionAnalysis.CommitDetailsAsync(selectionResult, contributorCommits);\n"
+            + "        }\n        else if (selectedView == \"teams\")", "        if (selectedView == \"teams\")");
+        value = RemoveRange(value, "        // Incident analysis specific", "            var kustoOptions = IncidentManagementKustoSettings.Value;");
+        value = RemoveRange(value, "    private IncidentManagementRequest CaptureIncidentManagementRequest()",
+            "    private async Task<IncidentManagementAnalysisResult> GetTeamsIncidentManagementCollection(");
+        return RemoveRange(value, "        var uniqueCommits = gitCommitCollection.Value", "#if DEBUG");
+    }
 
     private static string RemoveRange(string value, string start, string end)
     {

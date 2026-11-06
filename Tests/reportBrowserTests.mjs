@@ -8,6 +8,7 @@ import { inflateRawSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { runFeatureRegistryBrowser } from "./featureRegistryBrowserTests.mjs";
+import { runSourceSelectionBrowser } from "./sourceSelectionBrowserTests.mjs";
 
 const url = process.argv[2] ?? "http://127.0.0.1:5187/";
 const fixture = process.argv[3] ?? "gitCommits";
@@ -154,7 +155,9 @@ try {
         }, pageSession);
     }
     await cdp("Page.navigate", { url }, pageSession);
-    if (fixture === "teams-select-all") {
+    if (fixture === "source-selection") {
+        await runSourceSelectionBrowser({ url, evaluate, until, cdp, pageSession });
+    } else if (fixture === "teams-select-all") {
         const navigate = async label => {
             await until(() => evaluate(`([...document.querySelectorAll('.nav-tabs button')].find(button=>
                 button.textContent.trim()===${JSON.stringify(label)})?.click(),
@@ -175,7 +178,7 @@ try {
             await until(() => selection(), "open Teams selection " + label, 10000);
         };
         await navigate("Teams");
-        const tabs = [["Work Items",5],["Git Commits",23],["Incident Resolutions",5]];
+        const tabs = [["Work Items",12],["Git Commits",23],["Incident Resolutions",5]];
         for (const [label, total] of tabs) {
             await open(label);
             assert.deepEqual(await selection(), {total,selected:total,all:"true"}, label + " must default to Select All");
@@ -195,8 +198,10 @@ try {
             "Feature Registry must retain its fixed source rather than gain a selection list");
         await navigate("Details");
         await navigate("Work Items");
-        await evaluate(`(() => { const team=document.querySelector('#teamSelect'); team.value='FastSpark';
-            team.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+        await evaluate("document.querySelector('.team-dd [role=\"combobox\"]').click()");
+        await until(() => selection(), "open Details selection");
+        await evaluate(`(${popupExpression}).querySelectorAll('[role="option"]')[1].click()`);
+        await until(async () => (await selection())?.selected === 2, "add Details Work Items source");
         await navigate("Teams");
         for (const [label, total] of tabs) {
             await open(label);

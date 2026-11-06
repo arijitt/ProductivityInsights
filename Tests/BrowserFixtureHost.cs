@@ -32,6 +32,20 @@ internal static class BrowserFixtureHost
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
         builder.Services.AddRadzenComponents();
         builder.Services.AddScoped<ProductivityInsights.Services.ThemeService>();
+        var selectionClient = new SelectionAnalysisTests.FixtureClient { DelayMilliseconds = 600 };
+        var incidentSelectionClient = new IncidentSelectionTests.FixtureClient(selectionClient.Calls) { DelayMilliseconds = 600 };
+        if (fixture == "source-selection")
+        {
+            builder.Services.AddSingleton<ProductivityInsights.Services.Analysis.IAnalysisDataClient>(selectionClient);
+            builder.Services.AddSingleton<ProductivityInsights.Services.Analysis.IIncidentSelectionClient>(incidentSelectionClient);
+        }
+        else
+        {
+            builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IAnalysisDataClient, ProductivityInsights.Services.Analysis.AnalysisDataClient>();
+            builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IIncidentSelectionClient, ProductivityInsights.Services.Analysis.IncidentSelectionClient>();
+        }
+        builder.Services.AddScoped<ProductivityInsights.Services.Analysis.SelectionAnalysisService>();
+        builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IncidentSelectionService>();
         builder.Services.AddOptions<IncidentManagementKustoOptions>()
             .Bind(builder.Configuration.GetSection(IncidentManagementKustoOptions.SectionName));
         builder.Services.AddSingleton<IncidentManagementMetrics>();
@@ -47,6 +61,11 @@ internal static class BrowserFixtureHost
         app.UseStaticFiles();
         app.UseAntiforgery();
         app.MapGet("/feature-fixture-state", () => featureRegistry.State);
+        if (fixture == "source-selection")
+        {
+            app.MapGet("/selection-fixture-state", () => selectionClient.Calls.ToArray());
+            app.MapGet("/incident-selection-fixture-state", () => incidentSelectionClient.Completed);
+        }
         app.MapGet("/feature-summary-reference", () => Microsoft.AspNetCore.Http.Results.Content(
             HtmlSummaryReportWriter.Write(ReportWriters.ReportWriterFixtures.GitSnapshot(), "Git_Detailed.html"), "text/html"));
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
@@ -62,7 +81,7 @@ internal static class BrowserFixtureHost
                     ?? throw new InvalidOperationException($"Cannot create {componentType.Name}"));
             if (fixture.StartsWith("feature-", StringComparison.Ordinal))
                 return featureRegistry.Component();
-            if (fixture == "teams-select-all")
+            if (fixture is "teams-select-all" or "source-selection")
                 return new AnalysisOptions();
             var analysis = fixture is "incident-available-export" or "incident-unkeyed-export" or "incident-active-groups" ? "incidentManagement"
                 : fixture is "workItems" or "incidentManagement" ? fixture : "gitCommits";

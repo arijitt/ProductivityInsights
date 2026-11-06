@@ -1,6 +1,7 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using ProductivityInsights.Components.Pages;
+using ProductivityInsights.Options;
 using static ProductivityInsights.ReportTests.CompatibilityTests;
 using static ProductivityInsights.ReportTests.ExportIntegrationTests;
 
@@ -17,6 +18,7 @@ public static class TeamsSelectionTests
 
     public static void Run()
     {
+        VerifyWorkItemSourceSelections();
         var component = new AnalysisOptions();
         VerifyAll(component);
         Require((string)Get(component, "selectedView")! == "details"
@@ -77,6 +79,67 @@ public static class TeamsSelectionTests
             Set(prepared, selection, new List<string>());
             Require(Request(prepared) == request,
                 "Editing Select All after execution must not change the captured report sources.");
+        }
+    }
+
+    private static void VerifyWorkItemSourceSelections()
+    {
+        const string areaPath = @"HDInsight\HDInsight on K8s\Hilo Platform";
+        foreach (var view in new[] { "details", "trends" })
+        {
+            var component = new AnalysisOptions();
+            Call(component, "OnViewSelected", view);
+            Call(component, "OnProjectChanged", new ChangeEventArgs { Value = "HDInsight" });
+            var query = (WorkItemQueryOptions)Call(component, "GetWorkItemQueryOptions")!;
+            Require(query.OrganizationName == "msdata" && query.ProjectName == "HDInsight"
+                && query.TeamName == "HDInsight on K8s" && query.AreaPath == areaPath
+                && (bool)Call(component, "IsAreaPathApplicable", areaPath)!,
+                $"Selecting HDInsight in {view} must query the actual HDInsight on K8s team and Hilo Platform area path.");
+
+            Call(component, "OnProjectChanged", new ChangeEventArgs { Value = "A365" });
+            query = (WorkItemQueryOptions)Call(component, "GetWorkItemQueryOptions")!;
+            Require(query.ProjectName == "A365" && query.TeamName == "Cosmos on Azure Job Service"
+                && query.AreaPath == @"A365\Cosmos Analytics\Platforms\Cosmos on Azure"
+                && !(bool)Call(component, "IsAreaPathApplicable", areaPath)!,
+                "Switching back to A365 must restore its defaults and disable the HDInsight area path.");
+        }
+
+        Require(!Options("teamCombinationOptions").Contains("msdata : HDInsight : HDInsight Team : HDInsight"),
+            "The Supportability selection must not leave the broader HDInsight root area in the dropdown.");
+        foreach (var view in new[] { "details", "trends", "teams" })
+        foreach (var (project, team, area) in new[]
+        {
+            ("HDInsight", "HDInsight on K8s", areaPath),
+            ("HDInsight", "HDI Product Management", @"HDInsight\HDI Product Management"),
+            ("HDInsight", "HDInsight Team", @"HDInsight\Supportability"),
+            ("A365", "One Infra - CS", @"A365\One Infra\Cluster Service"),
+            ("A365", "One Infra - Foundations", @"A365\Synapse Jobs Service\BBC\Foundations"),
+            ("A365", "One Infra - Foundations", @"A365\One Infra\One Infra Foundations"),
+            ("A365", "One Infra - Reliability", @"A365\One Infra\Reliability")
+        })
+        {
+            var component = PreparedComponent("workItems");
+            Set(component, "selectedView", view);
+            var combination = $"msdata : {project} : {team} : {area}";
+            Require(Options("teamCombinationOptions").Contains(combination),
+                $"{view} must offer the source-qualified {team} option.");
+            var first = area == @"A365\One Infra\One Infra Foundations"
+                ? @"msdata : A365 : One Infra - Foundations : A365\Synapse Jobs Service\BBC\Foundations"
+                : Options("teamCombinationOptions")[0];
+            var chosen = new List<string> { first, combination };
+            Set(component, "SelectedWorkItemSources", chosen);
+            Call(component, "OnWorkItemSourcesChanged", chosen);
+            var sources = (List<(string Org, string Project, string Team, string AreaPath)>)
+                Call(component, "ParseSelectedTeamCombinations")!;
+            Require(sources.Count == 2 && sources[0].Project == "A365"
+                && sources[1] == ("msdata", project, team, area),
+                "Selections must retain distinct area paths even when they share the same project and team.");
+            Call(component, "BeginReportExportContext", 2);
+            var captured = Request(component).Sources;
+            Require(captured.Length == 2 && captured[1].Organization == "msdata"
+                && captured[1].Project == project && captured[1].Team == team
+                && captured[1].Scope == area,
+                "Analysis and export must capture each selected source without relabeling its project or area.");
         }
     }
 

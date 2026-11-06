@@ -13,6 +13,10 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddRadzenComponents();
 builder.Services.AddScoped<ProductivityInsights.Services.ThemeService>();
+builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IAnalysisDataClient, ProductivityInsights.Services.Analysis.AnalysisDataClient>();
+builder.Services.AddScoped<ProductivityInsights.Services.Analysis.SelectionAnalysisService>();
+builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IIncidentSelectionClient, ProductivityInsights.Services.Analysis.IncidentSelectionClient>();
+builder.Services.AddScoped<ProductivityInsights.Services.Analysis.IncidentSelectionService>();
 builder.Services.AddOptions<IncidentManagementKustoOptions>()
     .Bind(builder.Configuration.GetSection(IncidentManagementKustoOptions.SectionName))
     .Validate(

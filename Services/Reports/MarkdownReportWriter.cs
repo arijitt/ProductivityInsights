@@ -102,7 +102,8 @@ public static class MarkdownReportWriter
                 var open = group.Records.Where(pr => pr.Status == "active").ToArray();
                 var completed = group.Records.Where(pr => pr.Status == "completed").ToArray();
                 navigation?.MemberSection(output.Length, group.Key, [group.Identity]);
-                BoxHeading($"\U0001F464 Contributor: {group.Identity.DisplayName} - {open.Length} open PRs, {completed.Length} completed PRs");
+                var contributorLabel = Request.IsTeams && navigation is not null ? "" : "Contributor: ";
+                BoxHeading($"\U0001F464 {contributorLabel}{group.Identity.DisplayName} - {open.Length} open PRs, {completed.Length} completed PRs");
                 Line("  \U0001F4E6 msdata/A365/FeatureRegistry (all target branches)");
                 output.Append("\n");
                 PrRecords("Open PRs", open);
@@ -135,10 +136,11 @@ public static class MarkdownReportWriter
                 {
                     token.ThrowIfCancellationRequested();
                     Rule();
-                    var itemStart = ItemHeading($"\U0001F504 Pull Request: #{pr.Id}");
+                    var inlineTitle = navigation is not null && Request.IsTeams;
+                    var itemStart = ItemHeading(inlineTitle
+                        ? "\U0001F504 Pull Request:" : $"\U0001F504 Pull Request: #{pr.Id}");
                     Line("\U0001F464 Author: " + ReportFormatting.Identity(pr.Author));
                     Line("\U0001F50E Status: " + pr.Status + (pr.IsDraft ? " (draft)" : ""));
-                    var inlineTitle = navigation is not null && Request.IsTeams;
                     if (!inlineTitle) Line("\U0001F4AC Title: (Full PR title)");
                     CodeBlock(pr.Title, inlineTitle);
                     Line("\U0001F33F Source branch: " + pr.SourceBranch);
@@ -177,7 +179,7 @@ public static class MarkdownReportWriter
                     Link(pr.Url, "\U0001F310 View Pull Request", linkRecordedUrl: navigation is not null && Request.IsTeams);
                     Rule();
                     output.Append("\n");
-                    navigation?.ItemSection(itemStart, output.Length);
+                    navigation?.ItemSection(itemStart, output.Length, inlineTitle ? pr.Title.AsMemory() : null);
                 }
             }
 

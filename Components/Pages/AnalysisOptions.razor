@@ -261,81 +261,27 @@
 
     private RenderFragment RenderAnalysisForm() => __builder =>
     {
-        @if (selectedView == "teams")
-        {
             <div class="mb-4">
                 <label class="form-label">Organization : Project : Team : Area Path</label>
                 <div class="team-dd">
-                    <RadzenDropDown @bind-Value="@selectedTeamCombinations"
+                    <RadzenDropDown @bind-Value="@SelectedWorkItemSources"
                                     Data="@teamCombinationOptions"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
                                     SelectAllText="Select All"
                                     Placeholder="Select organization : project : team : area path"
-                                    Change="@OnSelectedTeamCombinationsChanged"
+                                    Change="@OnWorkItemSourcesChanged"
                                     Style="width: 100%;" />
                 </div>
-                @if (selectedTeamCombinations == null || !selectedTeamCombinations.Any())
+                @if (!SelectedWorkItemSources.Any())
                 {
                     <div class="text-muted small mt-1">Select at least one organization : project : team : area path combination.</div>
                 }
             </div>
-        }
-        else
+        @if (selectionAnalysisError is { } workError && UsesSourceSelection)
         {
-            <div class="mb-4">
-                <div class="row">
-                    <div class="col-md-6 mb-3 mb-md-0">
-                        <label for="organizationSelect" class="form-label">Organization Name</label>
-                        <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
-                            <option value="msdata">msdata</option>
-                            <!--<option value="powerbi">powerbi</option>-->
-                        </select>
-                    </div>
-                    <div class="col-md-6">
-                        <label for="projectSelect" class="form-label">Project Name</label>
-                        <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
-                            @if (selectedOrganization == "msdata")
-                            {
-                                <option value="A365">A365</option>
-                                <!--<option value="HDInsight">HDInsight</option>-->
-                            }
-                            else if (selectedOrganization == "powerbi")
-                            {
-                                <!--<option value="MWC">MWC</option>-->
-                            }
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            @if (selectedProject == "A365")
-            {
-                <div class="mb-4">
-                    <label for="teamSelect" class="form-label">Team Name</label>
-                    <select id="teamSelect" class="form-select" @onchange="OnTeamChanged" value="@selectedTeam">
-                        @foreach (var team in teamOptions)
-                        {
-                            <option value="@team">@team</option>
-                        }
-                    </select>
-                </div>
-            }
-        }
-
-        @if (selectedView != "teams")
-        {
-            <div class="mb-4">
-                <label for="areaPathSelect" class="form-label">Area Path</label>
-                <select id="areaPathSelect" class="form-select" @bind="selectedAreaPath">
-                    <option value="A365\Cosmos Analytics\Platforms\Cosmos on Azure" disabled="@(!IsAreaPathApplicable("A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure"))">A365\Cosmos Analytics\Platforms\Cosmos on Azure</option>
-                    <option value="A365\FastSpark" disabled="@(!IsAreaPathApplicable("A365\\FastSpark"))">A365\FastSpark</option>
-                    <option value="A365\JS Reliability" disabled="@(!IsAreaPathApplicable("A365\\JS Reliability"))">A365\JS Reliability</option>
-                    <option value="A365\Job Service V2" disabled="@(!IsAreaPathApplicable("A365\\Job Service V2"))">A365\Job Service V2</option>
-                    <option value="A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities" disabled="@(!IsAreaPathApplicable("A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"))">A365\Trident\DE_DevE\Lakehouse Platform\Lakehouse Job Execution and Capacities</option>
-                </select>
-            </div>
+            <div class="alert alert-danger" role="alert">@workError</div>
         }
 
         <div class="datetime-group mb-4">
@@ -541,104 +487,27 @@
 
     private RenderFragment RenderGitCommitsForm() => __builder =>
     {
-        @if (selectedView == "teams")
-        {
             <div class="mb-4">
                 <label class="form-label">Organization : Project : Git Repository : Branch</label>
                 <div class="team-dd">
-                    <RadzenDropDown @bind-Value="@selectedGitCommitCombinations"
+                    <RadzenDropDown @bind-Value="@SelectedGitSources"
                                     Data="@gitCommitCombinationOptions"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
                                     SelectAllText="Select All"
                                     Placeholder="Select organization : project : git repository : branch"
-                                    Change="@OnSelectedGitCommitCombinationsChanged"
+                                    Change="@OnGitSourcesChanged"
                                     Style="width: 100%;" />
                 </div>
-                @if (selectedGitCommitCombinations == null || !selectedGitCommitCombinations.Any())
+                @if (!SelectedGitSources.Any())
                 {
                     <div class="text-muted small mt-1">Select at least one organization : project : git repository : branch combination.</div>
                 }
             </div>
-        }
-        else
+        @if (selectionAnalysisError is { } gitError && UsesSourceSelection)
         {
-        <div class="mb-4">
-            <div class="row">
-                <div class="col-md-6 mb-3 mb-md-0">
-                    <label for="organizationSelect" class="form-label">Organization Name</label>
-                    <select id="organizationSelect" class="form-select" @onchange="OnOrganizationChanged" value="@selectedOrganization">
-                        <option value="msdata">msdata</option>
-                        <option value="powerbi">powerbi</option>
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <label for="projectSelect" class="form-label">Project Name</label>
-                    <select id="projectSelect" class="form-select" @onchange="OnProjectChanged" value="@selectedProject">
-                        @if (selectedOrganization == "msdata")
-                        {
-                            <option value="A365">A365</option>
-                            <option value="HDInsight">HDInsight</option>
-                        }
-                        else if (selectedOrganization == "powerbi")
-                        {
-                            <option value="MWC">MWC</option>
-                        }
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <div class="mb-4">
-            <label for="gitRepositorySelect" class="form-label">Git Repository</label>
-            <select id="gitRepositorySelect" class="form-select" @onchange="OnGitRepositoryChanged" value="@selectedGitRepository">
-                @if (selectedProject == "MWC")
-                {
-                    <option value="workload-sparkcore">workload-sparkcore</option>
-                    <option value="workload-lakehouse">workload-lakehouse</option>
-                    <option value="workload-genericcomputemanager">workload-genericcomputemanager</option>
-                    <option value="workload-vpaas">workload-vpaas</option>
-                    <option value="fabric-libraries">fabric-libraries</option>
-                    <option value="fabric-spark-load-testing-suite">fabric-spark-load-testing-suite</option>
-                    <option value="FeatureManagement">FeatureManagement</option>
-                    <option value="aspaas">aspaas</option>
-                }
-                else if (selectedProject == "HDInsight")
-                {
-                    <option value="HDInsight-Main">HDInsight-Main</option>
-                    <option value="wildfire-livy">wildfire-livy</option>
-                    <option value="wildfire-spark">wildfire-spark</option>
-                    <option value="wildfire-delta">wildfire-delta</option>
-                }
-                else if (selectedProject == "A365")
-                {
-                    <option value="BBC-VHD">BBC-VHD</option>
-                    <option value="BBC-Probes">BBC-Probes</option>
-                    <option value="BBC">BBC</option>
-                    <option value="SparkRuntimeTSGs">SparkRuntimeTSGs</option>
-                    <option value="marlin">marlin</option>
-                    <option value="nebula">nebula</option>
-                    <option value="impulse">impulse</option>
-                    <option value="spark-driver-adonet">spark-driver-adonet</option>
-                    <option value="spark-driver-jdbc">spark-driver-jdbc</option>
-                    <option value="spark-driver-odbc">spark-driver-odbc</option>
-                    <option value="AIAgents">AIAgents</option>
-                }
-            </select>
-        </div>
-
-        <div class="mb-4">
-            <label for="targetBranchSelect" class="form-label">Target Branch</label>
-            <select id="targetBranchSelect" class="form-select" @bind="selectedTargetBranch">
-                <option value="main" disabled="@(!IsMainBranchApplicable())">main</option>
-                <option value="master" disabled="@(!IsMasterBranchApplicable())">master</option>
-                <option value="develop" disabled="@(!IsDevelopBranchApplicable())">develop</option>
-                <option value="developer" disabled="@(!IsDeveloperBranchApplicable())">developer</option>
-                <option value="release/3.2" disabled="@(!IsRelease32BranchApplicable())">release/3.2</option>
-                <option value="spark-3.5-mnt" disabled="@(!IsSpark35MntBranchApplicable())">spark-3.5-mnt</option>
-            </select>
-        </div>
+            <div class="alert alert-danger" role="alert">@gitError</div>
         }
 
         <div class="datetime-group mb-4">
@@ -689,39 +558,27 @@
 
     private RenderFragment RenderIncidentResolutionsForm() => __builder =>
     {
-        @if (selectedView == "teams")
-        {
             <div class="mb-4">
                 <label class="form-label">Owning Team</label>
                 <div class="team-dd">
-                    <RadzenDropDown @bind-Value="@selectedOwningTeams"
+                    <RadzenDropDown @bind-Value="@SelectedIncidentSources"
                                     Data="@owningTeamOptions"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
                                     SelectAllText="Select All"
                                     Placeholder="Select one or more owning teams"
-                                    Change="@OnSelectedOwningTeamsChanged"
+                                    Change="@OnIncidentSourcesChanged"
                                     Style="width: 100%;" />
                 </div>
-                @if (selectedOwningTeams == null || !selectedOwningTeams.Any())
+                @if (!SelectedIncidentSources.Any())
                 {
                     <div class="text-muted small mt-1">Select at least one owning team.</div>
                 }
             </div>
-        }
-        else
+        @if (selectedView != "teams" && incidentSelectionError is { } incidentError)
         {
-        <div class="mb-4">
-            <label for="owningTeamSelect" class="form-label">Owning Team</label>
-            <select id="owningTeamSelect" class="form-select" @bind="selectedOwningTeam">
-                <option value="AZURESYNAPSEJOBSERVICE\JobPlatform">AZURESYNAPSEJOBSERVICE\JobPlatform</option>
-                <option value="AZURESYNAPSEJOBSERVICE\BBCTeam">AZURESYNAPSEJOBSERVICE\BBCTeam</option>
-                <option value="AZURESYNAPSEJOBSERVICE\CorePlatform">AZURESYNAPSEJOBSERVICE\CorePlatform</option>
-                <option value="HDINSIGHT\ControlPlane">HDINSIGHT\ControlPlane</option>
-                <option value="SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption">SPARKCORESERVICES\SparkCoreWorkload–JobExecutionCapacityConsumption</option>
-            </select>
-        </div>
+            <div class="alert alert-danger" role="alert">@incidentError</div>
         }
 
         <div class="datetime-group mb-4">
@@ -776,6 +633,7 @@
         if (selectedOption != option)
         {
             analysisOperationVersion++;
+            if (UsesSourceSelection) isLoadingResults = false;
             EnterFeatureRegistryTab(option);
             if (selectedOption == "incidentManagement")
             {
@@ -809,6 +667,7 @@
 
     private void RestoreCachedResults(string option, string view)
     {
+        RestoreSelectionResults(option, view);
         if (RestoreFeatureRegistryResults(option, view)) return;
         if (cachedResults.TryGetValue(GetCacheKey(option, view), out var cached))
         {
@@ -823,7 +682,7 @@
     private static string GetCacheKey(string option, string view) => $"{view}:{option}";
 
     private bool CanRunAnalysis =>
-        selectedView != "teams" || (selectedManager != null && orgTreeRoot != null);
+        HasSelectedSources && (selectedView != "teams" || (selectedManager != null && orgTreeRoot != null));
 
     private bool IsIncidentResolutionsSelected => selectedOption == "incidentManagement";
 
@@ -1235,6 +1094,8 @@
         }
         else if (selectedProject == "HDInsight")
         {
+            selectedTeam = "HDInsight on K8s";
+            selectedAreaPath = GetAreaPathForTeam();
             selectedGitRepository = "wildfire-livy";
         }
         else if (selectedProject == "MWC")
@@ -1449,9 +1310,18 @@
             "JS Reliability" => "A365\\JS Reliability",
             "Job Service V2" => "A365\\Job Service V2",
             "Lakehouse Job Execution and Capacities" => "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities",
+            "One Infra - CS" => "A365\\One Infra\\Cluster Service",
+            "One Infra - Foundations" => "A365\\Synapse Jobs Service\\BBC\\Foundations",
+            "One Infra - Reliability" => "A365\\One Infra\\Reliability",
+            "HDInsight on K8s" => "HDInsight\\HDInsight on K8s\\Hilo Platform",
+            "HDI Product Management" => "HDInsight\\HDI Product Management",
+            "HDInsight Team" => "HDInsight\\Supportability",
             _ => "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"
         };
     }
+
+    private static string GetProjectForTeam(string team) =>
+        team is "HDInsight on K8s" or "HDI Product Management" or "HDInsight Team" ? "HDInsight" : "A365";
 
     private bool IsAreaPathApplicable(string areaPath)
     {
@@ -1513,8 +1383,8 @@
         html.Append("<tbody>");
 
         // Teams + Work Items: reflect the multiselect combinations and the manager filter.
-        bool teamsWorkItems = selectedView == "teams" && selectedOption == "workItems";
-        bool teamsGitCommits = selectedView == "teams" && selectedOption == "gitCommits";
+        bool teamsWorkItems = selectedOption == "workItems";
+        bool teamsGitCommits = selectedOption == "gitCommits";
 
         // Common parameters
         if (!IsIncidentResolutionsSelected && !teamsWorkItems && !teamsGitCommits)
@@ -1529,7 +1399,7 @@
             if (teamsWorkItems)
             {
                 var managerLabel = System.Net.WebUtility.HtmlEncode(selectedManager?.displayName ?? "None selected");
-                html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
+                if (selectedView == "teams") html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
 
                 var combinations = ParseSelectedTeamCombinations();
                 html.Append($"<tr><td class='fw-bold'>Selections ({combinations.Count})</td><td>");
@@ -1565,7 +1435,7 @@
             if (teamsGitCommits)
             {
                 var managerLabel = System.Net.WebUtility.HtmlEncode(selectedManager?.displayName ?? "None selected");
-                html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
+                if (selectedView == "teams") html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
 
                 var combinations = ParseSelectedGitCommitCombinations();
                 html.Append($"<tr><td class='fw-bold'>Selections ({combinations.Count})</td><td>");
@@ -1595,12 +1465,11 @@
         // Incident analysis specific
         if (IsIncidentResolutionsSelected)
         {
-            if (selectedView == "teams")
             {
                 var managerLabel = System.Net.WebUtility.HtmlEncode(selectedManager?.displayName ?? "None selected");
-                html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
+                if (selectedView == "teams") html.Append($"<tr><td class='fw-bold' style='width: 200px;'>Manager Filter</td><td>{managerLabel}</td></tr>");
 
-                var owningTeams = (selectedOwningTeams ?? Enumerable.Empty<string>())
+                var owningTeams = SelectedIncidentSources
                     .Where(t => !string.IsNullOrWhiteSpace(t))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -1619,10 +1488,6 @@
                     html.Append("None selected");
                 }
                 html.Append("</td></tr>");
-            }
-            else
-            {
-                html.Append($"<tr><td class='fw-bold'>Owning Team</td><td>{selectedOwningTeam}</td></tr>");
             }
             var kustoOptions = IncidentManagementKustoSettings.Value;
             html.Append($"<tr><td class='fw-bold'>Kusto Cluster</td><td>{System.Net.WebUtility.HtmlEncode(kustoOptions.ClusterUri)}</td></tr>");
@@ -1666,10 +1531,11 @@
     private void CloseAnalysisResults()
     {
         if (CloseFeatureRegistryResults()) return;
-        HideReportExportContext(!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any());
+        HideReportExportContext(!string.IsNullOrEmpty(analysisResultHtml) && (contributors.Any() || UsesSourceSelection && displayedSelectionResult is not null));
         // Cache current results before clearing
-        if (!string.IsNullOrEmpty(analysisResultHtml) && contributors.Any())
+        if (!string.IsNullOrEmpty(analysisResultHtml) && (contributors.Any() || UsesSourceSelection && displayedSelectionResult is not null))
         {
+            CacheTeamsSourceData();
             var cacheKey = GetCacheKey(selectedOption, selectedView);
             cachedResults[cacheKey] = (
                 new List<(string Name, string Summary)>(contributors),
@@ -1686,6 +1552,11 @@
 
     private async Task ConfirmAnalysis()
     {
+        if (UsesSourceSelection)
+        {
+            await ConfirmSourceSelectionAsync();
+            return;
+        }
         if (IsFeatureRegistrySelected)
         {
             await ConfirmFeatureRegistryAnalysisAsync();
@@ -1705,6 +1576,7 @@
             incidentManagementCancellation = new CancellationTokenSource();
             incidentManagementCancellationToken = incidentManagementCancellation.Token;
             incidentManagementRequest = CaptureIncidentManagementRequest();
+            BeginIncidentSelection(incidentManagementRequest);
         }
 
         // Remove cached results for current tab to force fresh analysis
@@ -1901,6 +1773,7 @@
 
                         contributors = results;
                         isLoadingResults = false;
+                        incidentSelectionError = incidentManagementResult.ErrorMessage;
                         CompleteReportExportContext(operationVersion, string.IsNullOrEmpty(incidentManagementResult.ErrorMessage));
                         StateHasChanged();
                     });
@@ -1920,6 +1793,7 @@
                         }
 
                         isLoadingResults = false;
+                        incidentSelectionError = ex.Message;
                         CompleteReportExportContext(operationVersion, false);
                         StateHasChanged();
                     });
@@ -1952,7 +1826,7 @@
                             }
                             else
                             {
-                                <text>Work Items Completion Summary for '@selectedOrganization\@selectedProject\@selectedAreaPath'</text>
+                                <text>Work Items Completion Summary across @SelectionSummary</text>
                             }
                         </th>
                     </tr>
@@ -2044,7 +1918,7 @@
                             }
                             else
                             {
-                                <text>Code Contribution Summary for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch</text>
+                                <text>Code Contribution Summary across @SelectionSummary</text>
                             }
                         </th>
                     </tr>
@@ -2136,7 +2010,7 @@
                             }
                             else
                             {
-                                <text>ICM Incidents Summary for '@selectedOwningTeam'</text>
+                                <text>ICM Incidents Summary across @IncidentSelectionSummary</text>
                             }
                         </th>
                     </tr>
@@ -2269,7 +2143,7 @@
                         <thead>
                             <tr>
                                 <th colspan="9" class="text-center fw-bold table-title-header">
-                                    Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                                    Code Commit Trends — @(char.ToUpper(DisplayedTrendPeriod[0]) + DisplayedTrendPeriod.Substring(1)) across @SelectionSummary
                                 </th>
                             </tr>
                             <tr>
@@ -2325,7 +2199,7 @@
                         <thead>
                             <tr>
                                 <th class="text-center fw-bold table-title-header">
-                                    Code Commit Trends — @(char.ToUpper(selectedTrendPeriod[0]) + selectedTrendPeriod.Substring(1)) for '@selectedOrganization\@selectedProject\@selectedGitRepository\@selectedTargetBranch' Branch
+                                    Code Commit Trends — @(char.ToUpper(DisplayedTrendPeriod[0]) + DisplayedTrendPeriod.Substring(1)) across @SelectionSummary
                                 </th>
                             </tr>
                         </thead>
@@ -2372,6 +2246,7 @@
             // Load details if not already loaded
             if (!contributorDetails.ContainsKey(contributorName))
             {
+                var detailVersion = analysisOperationVersion;
                 StateHasChanged(); // Show loading state
                 
                 try
@@ -2390,12 +2265,13 @@
                         details = await GetIncidentDetails(contributorName);
                     }
                     
-                    contributorDetails[contributorName] = details;
+                    if (detailVersion == analysisOperationVersion) contributorDetails[contributorName] = details;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error loading details for {contributorName}: {ex.Message}");
-                    contributorDetails[contributorName] = $"<div class='text-danger p-3'><strong>Error loading details:</strong> {System.Web.HttpUtility.HtmlEncode(ex.Message)}</div>";
+                    if (detailVersion == analysisOperationVersion)
+                        contributorDetails[contributorName] = $"<div class='text-danger p-3'><strong>Error loading details:</strong> {System.Web.HttpUtility.HtmlEncode(ex.Message)}</div>";
                 }
                 StateHasChanged(); // Show loaded details
             }
@@ -2406,12 +2282,10 @@
     private IncidentManagementRequest CaptureIncidentManagementRequest()
     {
         bool isTeamsView = selectedView == "teams";
-        var owningTeams = isTeamsView
-            ? (selectedOwningTeams ?? Enumerable.Empty<string>())
+        var owningTeams = SelectedIncidentSources
                 .Where(team => !string.IsNullOrWhiteSpace(team))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList()
-            : new List<string>();
+                .ToList();
 
         string? validationError = null;
         HashSet<string>? managerIdentities = null;
@@ -2420,7 +2294,7 @@
         {
             validationError = "Fetch a manager's reports first to filter Incident Resolutions data by their team.";
         }
-        else if (isTeamsView && !owningTeams.Any())
+        else if (!owningTeams.Any())
         {
             validationError = "Select at least one owning team.";
         }
@@ -2433,8 +2307,8 @@
             isTeamsView,
             selectedOwningTeam,
             owningTeams,
-            startDateTime,
-            endDateTime,
+            isTeamsView ? startDateTime : startDateTime ?? DateTime.UnixEpoch,
+            isTeamsView ? endDateTime : endDateTime ?? DateTime.UtcNow,
             managerIdentities,
             validationError);
     }
@@ -2448,32 +2322,11 @@
             return await GetTeamsIncidentManagementCollection(request, cancellationToken);
         }
 
-        var resolvedTask = IncidentManagementMetricsClient.SearchResolvedIncidentsAsync(
-            request.OwningTeam,
-            request.StartDateTime,
-            request.EndDateTime,
-            cancellationToken);
-        var mitigatedTask = IncidentManagementMetricsClient.SearchMitigatedIncidentsAsync(
-            request.OwningTeam,
-            request.StartDateTime,
-            request.EndDateTime,
-            cancellationToken);
-        var activeTask = IncidentManagementMetricsClient.SearchAllActiveIncidentsAsync(
-            request.OwningTeam,
-            cancellationToken);
-        var createdTask = IncidentManagementMetricsClient.SearchCreatedIncidentsAsync(
-            request.OwningTeam,
-            request.StartDateTime,
-            request.EndDateTime,
-            cancellationToken);
-
-        await Task.WhenAll(resolvedTask, mitigatedTask, activeTask, createdTask);
-
-        return BuildIncidentManagementStatistics(
-            await resolvedTask,
-            await mitigatedTask,
-            await activeTask,
-            await createdTask);
+        if (request.ValidationError is not null)
+            return EmptyIncidentManagementResult(request.ValidationError);
+        var collected = await IncidentSelection.CollectAsync(request.OwningTeams,
+            request.StartDateTime, request.EndDateTime, cancellationToken);
+        return BuildIncidentManagementStatistics(collected.Resolved, collected.Mitigated, collected.Active, collected.Created);
     }
 
     private async Task<IncidentManagementAnalysisResult> GetTeamsIncidentManagementCollection(
@@ -3093,11 +2946,7 @@
             return $"<div class='work-item-entry'><div class='work-item-info'><em>No work items found for {contributorName}.</em></div></div>";
         }
 
-        WorkItemQueryOptions workItemQueryOptions = GetWorkItemQueryOptions();
-
-        Dictionary<int, WorkItemHistoryCollection> workItemHistoryCollectionMap =  await WorkItemCompletionMetrics.GetWorkItemHistoryCollectionAsync(
-            workItemQueryOptions.OrganizationName,
-            new WorkItemDetailsCollection() { count = contributorWorkItems.Count, value = contributorWorkItems});
+        var workItemHistoryCollectionMap = await GetSelectedWorkItemHistoryAsync(contributorWorkItems);
 
         var details = new System.Text.StringBuilder();
 
@@ -3113,7 +2962,7 @@
         foreach (var workItem in contributorWorkItems)
         {
             var workItemId = workItem.fields?.SystemId ?? 0;
-            if (workItemHistoryCollectionMap.TryGetValue(workItemId, out var historyCollection) &&
+            if (workItemHistoryCollectionMap.TryGetValue(workItem, out var historyCollection) &&
                 historyCollection?.value != null && historyCollection.value.Count > 1)
             {
                 // Build state periods for this work item
@@ -3261,7 +3110,7 @@
             }
 
             // Add work item history and state transitions
-            if (workItemHistoryCollectionMap.TryGetValue(workItemId, out var historyCollection) &&
+            if (workItemHistoryCollectionMap.TryGetValue(workItem, out var historyCollection) &&
                 historyCollection?.value != null && historyCollection.value.Count > 1)
             {
                 // Build state periods: track when each state started and ended
@@ -3506,7 +3355,7 @@
         var result = new List<(string Org, string Project, string Team, string AreaPath)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var combination in selectedTeamCombinations ?? Enumerable.Empty<string>())
+        foreach (var combination in SelectedWorkItemSources)
         {
             if (string.IsNullOrWhiteSpace(combination) || !seen.Add(combination))
             {
@@ -3742,7 +3591,7 @@
         var result = new List<(string Org, string Project, string Repo, string Branch)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var combination in selectedGitCommitCombinations ?? Enumerable.Empty<string>())
+        foreach (var combination in SelectedGitSources)
         {
             if (string.IsNullOrWhiteSpace(combination) || !seen.Add(combination))
             {
@@ -3820,7 +3669,11 @@
 
         GitCommitCollection? gitCommitCollection;
 
-        if (selectedView == "teams")
+        if (UsesSourceSelection && displayedSelectionResult is { } selectionResult)
+        {
+            gitCommitCollection = await SelectionAnalysis.CommitDetailsAsync(selectionResult, contributorCommits);
+        }
+        else if (selectedView == "teams")
         {
             // Commits may span multiple repositories; fetch line details per source
             // repository/branch and concatenate so each commit is resolved correctly.
@@ -4018,10 +3871,17 @@
         "FastSpark",
         "JS Reliability",
         "Job Service V2",
-        "Lakehouse Job Execution and Capacities"
+        "Lakehouse Job Execution and Capacities",
+        "One Infra - CS",
+        "One Infra - Foundations",
+        "One Infra - Reliability",
+        "HDInsight on K8s",
+        "HDI Product Management",
+        "HDInsight Team"
     };
     private static readonly string[] teamCombinationOptions = teamOptions
-        .Select(team => BuildTeamCombination("msdata", "A365", team, GetAreaPathForTeam(team)))
+        .Select(team => BuildTeamCombination("msdata", GetProjectForTeam(team), team, GetAreaPathForTeam(team)))
+        .Append(BuildTeamCombination("msdata", "A365", "One Infra - Foundations", "A365\\One Infra\\One Infra Foundations"))
         .ToArray();
     private HashSet<string> selectedTeams = new HashSet<string>(teamOptions, StringComparer.OrdinalIgnoreCase);
     private List<string> selectedTeamCombinations = new List<string>(teamCombinationOptions);
@@ -4110,17 +3970,16 @@
     // Cache analysis results per tab
     private Dictionary<string, (List<(string Name, string Summary)> Contributors, Dictionary<string, string> Details, HashSet<string> ExpandedRows)> cachedResults = new Dictionary<string, (List<(string Name, string Summary)>, Dictionary<string, string>, HashSet<string>)>();
 
-    private List<CommitTrendDataPoint> BuildTrendData(GitCommitCollection gitCommitCollection)
+    private List<CommitTrendDataPoint> BuildTrendData(GitCommitCollection gitCommitCollection, string? capturedPeriod = null)
     {
         if (gitCommitCollection?.Value == null || !gitCommitCollection.Value.Any())
             return new List<CommitTrendDataPoint>();
 
         // Defensively deduplicate commits before aggregation.
         var uniqueCommits = gitCommitCollection.Value
-            .GroupBy(c => string.IsNullOrWhiteSpace(c.CommitId)
+            .GroupBy(c => (c.Organization, c.ProjectName, c.RepositoryId, Id: string.IsNullOrWhiteSpace(c.CommitId)
                 ? $"NO_ID|{c.CommitterDate:O}|{c.AuthorEmail}|{c.CommitterEmail}|{c.Comment}"
-                : c.CommitId,
-                StringComparer.OrdinalIgnoreCase)
+                : c.CommitId.ToUpperInvariant()))
             .Select(g => g.First())
             .ToList();
 
@@ -4130,13 +3989,13 @@
 
         IEnumerable<IGrouping<string, GitCommit>> grouped;
 
-        if (selectedTrendPeriod == "yearly")
+        if ((capturedPeriod ?? selectedTrendPeriod) == "yearly")
         {
             grouped = uniqueCommits
                 .GroupBy(c => c.CommitterDate.ToString("yyyy"))
                 .OrderBy(g => g.Key);
         }
-        else if (selectedTrendPeriod == "daily")
+        else if ((capturedPeriod ?? selectedTrendPeriod) == "daily")
         {
             grouped = uniqueCommits
                 .GroupBy(c => c.CommitterDate.ToString("yyyy-MM-dd"))

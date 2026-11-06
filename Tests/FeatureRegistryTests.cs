@@ -260,14 +260,27 @@ public static class FeatureRegistryTests
                     && !html.Contains("Collection started") && !html.Contains("Collection finished")
                     && !html.Contains("Run Analysis snapshot") && !html.Contains(data.Request.RunId.ToString()),
                     "Details and Trends must continue to omit captured-input context.");
-            Require(!MarkdownReportWriter.Write(report).Contains("Captured inputs and export query context"),
-                "The Teams HTML footer must not change legacy Feature Registry Markdown.");
-            Require(main.Descendants("h3").Count(element => Class(element, "report-person-heading")) == (view == "teams" ? 3 : 2),
+            var markdown = MarkdownReportWriter.Write(report);
+            Require(!markdown.Contains("Captured inputs and export query context")
+                && markdown.Contains("\U0001F464 Contributor: Alice Author - 2 open PRs, 0 completed PRs")
+                && new[] { 1, 2, 4, 3 }.All(id => markdown.Contains($"\U0001F504 Pull Request: \\#{id}")),
+                "Teams HTML formatting must not change legacy Feature Registry Markdown context, contributor headers or numbered PR headings.");
+            var personHeadings = main.Descendants("h3").Where(element => Class(element, "report-person-heading")).ToArray();
+            Require(personHeadings.Length == (view == "teams" ? 3 : 2),
                 "Teams must include every roster member; other views must retain their recorded contributors.");
+            if (view != "teams")
+                Require(personHeadings.Select(element => element.Value).SequenceEqual(new[]
+                {
+                    "\U0001F464 Contributor: Alice Author - 2 open PRs, 0 completed PRs",
+                    "\U0001F464 Contributor: Bob Closer - 0 open PRs, 2 completed PRs"
+                }), "Details and Trends must retain their existing contributor headers.");
             var records = main.Descendants("h4").Where(element => Class(element, "report-record-heading")).ToArray();
-            Require(records.Select(element => element.Value).SequenceEqual(new[]
-                { "\U0001F504 Pull Request: #1", "\U0001F504 Pull Request: #2", "\U0001F504 Pull Request: #4", "\U0001F504 Pull Request: #3" }),
-                "Every PR must retain its original within-group ordering and styled record heading.");
+            if (view == "teams")
+                CheckTeamPrRecords(main, data.Open.Concat(data.Completed));
+            else
+                Require(records.Select(element => element.Value).SequenceEqual(new[]
+                    { "\U0001F504 Pull Request: #1", "\U0001F504 Pull Request: #2", "\U0001F504 Pull Request: #4", "\U0001F504 Pull Request: #3" }),
+                    "Details and Trends must retain their original numbered PR headings and ordering.");
             var titles = view == "teams"
                 ? main.Descendants("span").Where(element => Class(element, "report-pr-title-value")).Select(element => element.Value)
                 : main.Descendants("code").Select(element => element.Value.TrimEnd('\n'));
@@ -327,6 +340,7 @@ public static class FeatureRegistryTests
             "Unavailable membership records must remain complete, separate, and never receive roster credit.");
         Require(unavailableHtml.Contains("Zero counts mean no attributed PRs"),
             "Zero recorded counts must not hide unresolved membership evidence.");
+        CheckTeamPrRecords(Main(unavailableHtml), unavailable.Unattributed);
         CheckTeamMembers(unavailable, Main(unavailableHtml));
         CheckPrDivider(Main(unavailableHtml));
         var bothGroups = SnapshotForTest(Request("teams"), baseline.Open,
@@ -343,7 +357,13 @@ public static class FeatureRegistryTests
         var emptyHtml = HtmlDetailedReportWriter.Write(Wrap(emptyData));
         Require(emptyHtml.Contains("No matching PRs in the collected snapshot")
             && ReportFoldMarkup.Parse(emptyHtml).All(fold => fold.Kind is "person" or "context"), "Empty PR snapshots must stay explicit without fabricated records.");
+        CheckTeamPrRecords(Main(emptyHtml), []);
         CheckTeamMembers(emptyData, Main(emptyHtml));
+        var duplicateTitles = SnapshotForTest(Request("teams"),
+            baseline.Open.Select(pr => pr with { Title = "Shared <title> & [link](javascript:bad)" }).ToImmutableArray(),
+            baseline.Completed.Select(pr => pr with { Title = "Shared <title> & [link](javascript:bad)" }).ToImmutableArray(), []);
+        CheckTeamPrRecords(Main(HtmlDetailedReportWriter.Write(Wrap(duplicateTitles))),
+            duplicateTitles.Open.Concat(duplicateTitles.Completed));
         var encodedRequest = Request("teams") with
         {
             Roster = Request("teams").Roster.SetItem(2, new("No <PR> & member", "zero@example.test", "zero", "zero@example.test"))
@@ -358,6 +378,7 @@ public static class FeatureRegistryTests
             "Multiline PR text must survive bounded code-block rendering without truncation or structural injection.");
         var teamTitle = SnapshotForTest(Request("teams"), [baseline.Open[0] with { Title = multiline }], [], []);
         var titleHtml = HtmlDetailedReportWriter.Write(Wrap(teamTitle));
+        CheckTeamPrRecords(Main(titleHtml), teamTitle.Open);
         Require(Main(titleHtml).Descendants("span").Single(element => Class(element, "report-pr-title-value")).Value == multiline
             && !titleHtml.Contains("(Full PR title)") && !Main(titleHtml).Descendants("code").Any(),
             "Inline Teams titles must preserve full multiline text and escaping without code-block presentation.");
@@ -367,13 +388,35 @@ public static class FeatureRegistryTests
         var largeDocument = ReportDocumentBuilder.Build(Wrap(large));
         var before = GC.GetAllocatedBytesForCurrentThread();
         var bytes = HtmlDetailedReportWriter.WriteTo(largeDocument, TextWriter.Null);
-        Require(bytes > ReportRenderingLimits.MaximumDetailedMarkupBytes && bytes < ReportRenderingLimits.MaximumExportFileBytes
+        Require(bytes > 2L * largeTitle.Length * large.Open.Length * "&amp;".Length
+            && bytes < ReportRenderingLimits.MaximumExportFileBytes
             && GC.GetAllocatedBytesForCurrentThread() - before < ReportRenderingLimits.MaximumInputCharacters,
-            "Large inline PR titles must stream outside the structural Markdown buffer without full-text duplication.");
+            "Full PR titles in both headings and fields must stream from captured references without inflating the structural Markdown buffer.");
 
         static ReportSnapshot Wrap(FeatureRegistrySnapshot data) => new() { Request = data.Request, AsOf = data.FinishedAt, FeatureRegistry = data };
         static XElement Main(string html) => XElement.Parse(html[html.IndexOf("<main>", StringComparison.Ordinal)..(html.IndexOf("</main>", StringComparison.Ordinal) + 7)]);
         static bool Class(XElement element, string value) => ((string?)element.Attribute("class"))?.Split(' ').Contains(value) == true;
+        static void CheckTeamPrRecords(XElement main, IEnumerable<FeatureRegistryPullRequest> expected)
+        {
+            var records = expected.ToArray();
+            var items = main.Descendants("details").Where(element => Class(element, "report-item-details")).ToArray();
+            Require(items.Length == records.Length, "Every recorded PR must retain its own disclosure, even when titles match.");
+            foreach (var (item, pr) in items.Zip(records))
+            {
+                var heading = item.Element("summary")!.Element("h4")!;
+                Require(Class(heading, "report-record-heading") && heading.Value == "\U0001F504 Pull Request: " + pr.Title
+                    && !heading.Descendants("a").Any() && !heading.Descendants("script").Any()
+                    && !heading.Descendants("h3").Any() && !heading.Descendants("title").Any(),
+                    "Teams PR headings must show the complete captured title as encoded text instead of the PR number.");
+                var idField = item.Descendants("span").Single(element => Class(element, "report-label") && element.Value == "PR ID:")
+                    .NextNode as XText;
+                Require(idField?.Value.Trim() == $"{pr.Id}",
+                    $"Title-based headings must preserve PR ID {pr.Id}; actual field: {idField?.Value}");
+                var links = item.Descendants("a").Select(link => (string?)link.Attribute("href")).ToArray();
+                Require(links.Contains(pr.Url),
+                    $"Title-based headings must preserve URL {pr.Url}; actual links: {string.Join(", ", links)}");
+            }
+        }
         static void CheckPrDivider(XElement container)
         {
             var completed = container.Elements("h4").Single(element => element.Value.StartsWith("Completed PRs ("));
@@ -409,8 +452,8 @@ public static class FeatureRegistryTests
                 var heading = headings.Single(element => (string?)element.Attribute("id") == target);
                 CheckPrDivider(heading.Parent!.Parent!.Elements("div").Single(element => Class(element, "report-person-content")));
                 Require(beforeSummary.Contains(heading)
-                    && heading.Value == $"\U0001F464 Contributor: {member.DisplayName} - {open} open PRs, {completed} completed PRs",
-                    "Roster links must target the correct name-only, counted person heading within the main list, including zero-PR members.");
+                    && heading.Value == $"\U0001F464 {member.DisplayName} - {open} open PRs, {completed} completed PRs",
+                    "Roster links must target the correct counted person heading without a Contributor: prefix, including zero-PR members.");
                 var row = rows[Array.IndexOf(headings, heading)].Elements("td").Select(cell => cell.Value).ToArray();
                 Require(row.SequenceEqual([member.DisplayName, "msdata/A365/FeatureRegistry", open.ToString(), completed.ToString()]),
                     "Summary must include every member's name and correct counts without email/principal/ID annotations.");

@@ -414,6 +414,11 @@ html[data-bs-theme="dark"] body {
     color: #dee2e6;
 }
 
+/* Radzen multi-select popups retain a light surface and render outside the page's scoped styles. */
+[data-bs-theme="dark"] .rz-multiselect-panel {
+    color: #212529;
+}
+
 [data-bs-theme="dark"] input,
 [data-bs-theme="dark"] textarea,
 [data-bs-theme="dark"] select {

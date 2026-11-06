@@ -462,6 +462,10 @@ export async function runFeatureRegistryBrowser({ fixture, url, profile, downloa
             banner: true, tableRadius: "10px", tableFont: "12.5px", columns: [4], records: empty ? 0 : 4, overallSummary: false,
             title: `${view === "Teams" ? "Team " : ""}Feature Registry Pull Request Analysis (2026-07-01 to 2026-07-31)` },
         "PR exports must use the Git reference typography, section banners, compact tables and per-record details");
+        assert.deepEqual(await inspect(`[...document.querySelectorAll('.report-record-heading')].map(heading=>heading.textContent)`),
+            empty ? [] : [1, 2, 4, 3].map(id => view === "Teams"
+                ? `🔄 Pull Request: PR ${id} <script>unsafe()</script> | [text]` : `🔄 Pull Request: #${id}`),
+            "Teams PR headings must use full encoded titles; Details and Trends retain their numbered headings");
         if (view === "Teams") {
             assert.deepEqual(await inspect(`(() => {
                 const context=document.querySelector('.report-context-details');
@@ -494,7 +498,7 @@ export async function runFeatureRegistryBrowser({ fixture, url, profile, downloa
             assert.equal(await inspect(`document.querySelectorAll('pre,code').length`), 0);
             assert.equal(await inspect(`document.querySelector('main').textContent.includes('(Full PR title)')`), false);
             assert.deepEqual(await inspect(`[...document.querySelectorAll('.report-item-details')].map(item=>({
-                id:Number(item.querySelector('.report-record-heading').textContent.split('#').at(-1)),
+                id:Number([...item.querySelectorAll('.report-label')].find(label=>label.textContent==='PR ID:').nextSibling.textContent.trim()),
                 files:[...item.querySelectorAll('.report-file')].map(file=>file.textContent.trim()),
                 comparison:item.textContent.includes('iteration 3') && item.textContent.includes('compareTo=0'),
                 count:item.textContent.includes('Changed Files (14)')
@@ -527,8 +531,8 @@ export async function runFeatureRegistryBrowser({ fixture, url, profile, downloa
                 ["No activity", 0, 0]
             ];
             assert.deepEqual(await inspect(`[...document.querySelectorAll('.report-person-heading')].map(heading=>heading.textContent)`),
-                members.map(([name, open, completed]) => `👤 Contributor: ${name} - ${open} open PRs, ${completed} completed PRs`),
-                "Zero-PR members must use the same name-only counted headings as active members");
+                members.map(([name, open, completed]) => `👤 ${name} - ${open} open PRs, ${completed} completed PRs`),
+                "Active and zero-PR members must retain names and counts without the Contributor: prefix");
             assert.deepEqual(await inspect(`[...document.querySelectorAll('table tbody tr')].filter(row=>!row.closest('.report-context-details')).slice(0,-1).map(row=>
                 [...row.cells].map(cell=>cell.textContent))`),
                 members.map(([name, open, completed]) => [name, "msdata/A365/FeatureRegistry", String(open), String(completed)]),
@@ -542,7 +546,7 @@ export async function runFeatureRegistryBrowser({ fixture, url, profile, downloa
                         inMainList:!!(heading.compareDocumentPosition(summary)&Node.DOCUMENT_POSITION_FOLLOWING)};
                 });
             })()`), members.map(([name, open, completed]) => ({
-                text: `👤 Contributor: ${name} - ${open} open PRs, ${completed} completed PRs`,
+                text: `👤 ${name} - ${open} open PRs, ${completed} completed PRs`,
                 visible: true, inMainList: true
             })), "Every hierarchy link must land on its own visible person heading before the summary");
             if (!empty) {
