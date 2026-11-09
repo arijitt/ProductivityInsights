@@ -15,6 +15,12 @@ public static class ReportServiceRegistration
         services.AddScoped(provider => new AdoReportCollector(
             provider.GetRequiredService<IHttpClientFactory>().CreateClient("ReportExportAdo"),
             async token => (await UserToken.GetToken().WaitAsync(token)).Token));
+        services.AddKeyedScoped<AdoReportCollectionLimits>("workItems",
+            (_, _) => ReadWorkItemCollectionLimits(configuration));
+        services.AddKeyedScoped<AdoReportCollector>("workItems", (provider, _) => new AdoReportCollector(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient("ReportExportAdo"),
+            async token => (await UserToken.GetToken().WaitAsync(token)).Token,
+            provider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems")));
         services.AddScoped<IOptions<IncidentReportCoverage>>(_ =>
             Microsoft.Extensions.Options.Options.Create(ReadIncidentCoverage(configuration)));
         services.AddScoped<IIncidentReportCoverageProvider>(provider => new IncidentReportConfiguredCoverageProvider(
@@ -27,8 +33,18 @@ public static class ReportServiceRegistration
             provider.GetRequiredService<IIncidentReportQueryClient>()));
         services.AddScoped<IReportCollector>(provider => new ReportCollectionService(
             () => provider.GetRequiredService<AdoReportCollector>(),
-            () => provider.GetRequiredService<IncidentReportCollector>()));
+            () => provider.GetRequiredService<IncidentReportCollector>(),
+            () => provider.GetRequiredKeyedService<AdoReportCollector>("workItems")));
         return services;
+    }
+
+    private static AdoReportCollectionLimits ReadWorkItemCollectionLimits(IConfiguration configuration)
+    {
+        const string key = "ReportExport:WorkItems:MaxCollectionBytes";
+        var maximum = configuration.GetValue<long?>(key) ?? 512L * 1024 * 1024;
+        if (maximum <= 0)
+            throw new InvalidOperationException($"{key} must be a positive number of bytes.");
+        return new AdoReportCollectionLimits { MaxCollectionBytes = maximum };
     }
 
     private static IncidentReportCoverage ReadIncidentCoverage(IConfiguration configuration)

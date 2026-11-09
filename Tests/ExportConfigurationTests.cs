@@ -10,6 +10,7 @@ public static class ExportConfigurationTests
 {
     public static void Run()
     {
+        VerifyWorkItemBudgetConfiguration();
         using (var services = Build([]))
         using (var scope = services.CreateScope())
         {
@@ -52,7 +53,38 @@ public static class ExportConfigurationTests
             ExpectCoverageFailure(() => scope.ServiceProvider.GetRequiredService<IOptions<IncidentReportCoverage>>(), "positive");
     }
 
-    private static ServiceProvider Build(IEnumerable<KeyValuePair<string, string?>> values)
+    private static void VerifyWorkItemBudgetConfiguration()
+    {
+        const string key = "ReportExport:WorkItems:MaxCollectionBytes";
+        foreach (var maximum in new[] { 256L * 1024 * 1024, 3L * 1024 * 1024 * 1024 })
+        {
+            using var services = Build(new Dictionary<string, string?> { [key] = maximum.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            using var scope = services.CreateScope();
+            var limits = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems");
+            CompatibilityTests.Require(limits.MaxCollectionBytes == maximum,
+                "Work Items export must use the configured cumulative byte limit, including values larger than Int32.");
+            _ = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollector>("workItems");
+        }
+        foreach (var invalid in new[] { "0", "-1", "invalid", "9223372036854775808" })
+        {
+            using var services = Build(new Dictionary<string, string?> { [key] = invalid });
+            using var scope = services.CreateScope();
+            _ = scope.ServiceProvider.GetRequiredService<IReportCollector>();
+            _ = scope.ServiceProvider.GetRequiredService<AdoReportCollector>();
+            try
+            {
+                _ = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollector>("workItems");
+                throw new Exception("Invalid Work Items export budget was accepted.");
+            }
+            catch (InvalidOperationException exception)
+            {
+                CompatibilityTests.Require(exception.Message.Contains(key),
+                    "Invalid Work Items export budgets must identify their configuration key without blocking other collectors.");
+            }
+        }
+    }
+
+    internal static ServiceProvider Build(IEnumerable<KeyValuePair<string, string?>> values)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
         var services = new ServiceCollection();

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using ProductivityInsights.Models.Reports;
 using ProductivityInsights.Services.Reports;
 using static ProductivityInsights.ReportTests.AdoReports.AdoReportAssert;
@@ -18,6 +19,7 @@ public static class AdoResponseBudgetTests
         await UndeclaredResponseLimitAsync();
         await DeclaredResponseLimitAsync();
         await CumulativeBudgetAsync();
+        await ConfiguredWorkItemBudgetAsync();
         await OverlappingCancelledCollectionsAsync();
         await FileContentResponseLimitAsync();
         await CountOnlyDiffBudgetAsync();
@@ -107,6 +109,89 @@ public static class AdoResponseBudgetTests
             WorkRequest(new ReportSource("next-run", "org-next", "Project", "Area")), null, CancellationToken.None);
         That(snapshot.WorkItems.IsEmpty && streams.Count == 3 && streams[^1].BytesRead == 100,
             "A later collection on the same collector must get a fresh independent budget after failure.");
+    }
+
+    private static async Task ConfiguredWorkItemBudgetAsync()
+    {
+        using var services = ExportConfigurationTests.Build([]);
+        using var scope = services.CreateScope();
+        var limits = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems");
+        var streams = new List<GeneratedResponseStream>();
+        const int revisions = 17;
+        using var handler = new AdoReportTestHttp(async (message, token) =>
+        {
+            var path = message.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/wiql", StringComparison.Ordinal))
+            {
+                using var body = JsonDocument.Parse(await message.Content!.ReadAsStringAsync(token));
+                return AdoReportTestHttp.Json(new { workItems = body.RootElement.GetProperty("query").GetString()!.Contains("[System.Id] > 0")
+                    ? new[] { new { id = 7 } } : [] });
+            }
+            if (path.EndsWith("/workitemsbatch", StringComparison.Ordinal))
+                return AdoReportTestHttp.Json(new { value = new[]
+                {
+                    new
+                    {
+                        id = 7, rev = revisions,
+                        fields = new Dictionary<string, object>
+                        {
+                            ["System.Title"] = "Complete history", ["System.WorkItemType"] = "Task", ["System.State"] = "Done",
+                            ["System.CreatedDate"] = "2020-01-01T00:00:00Z", ["System.ChangedDate"] = "2020-01-10T00:00:00Z",
+                            ["System.AreaPath"] = "Project\\Team"
+                        }
+                    }
+                } });
+            That(path.EndsWith("/revisions", StringComparison.Ordinal), "The configured budget must retain the existing revisions API.");
+            var revision = int.Parse(AdoReportTestHttp.Query(message, "$skip")) + 1;
+            var json = JsonSerializer.Serialize(new { value = new[]
+            {
+                new
+                {
+                    id = 7, rev = revision,
+                    fields = new Dictionary<string, object>
+                    {
+                        ["System.State"] = revision == revisions ? "Done" : "Active",
+                        ["System.ChangedDate"] = DateTimeOffset.Parse("2020-01-01T00:00:00Z").AddMinutes(revision),
+                        ["System.ChangedBy"] = new { displayName = $"Actor {revision}" }
+                    }
+                }
+            } });
+            var stream = new GeneratedResponseStream(json, 8 * 1024 * 1024 - Encoding.UTF8.GetByteCount(json),
+                (byte)' ', "", maximumReadSize: 81920);
+            streams.Add(stream);
+            return StreamResponse(stream);
+        });
+        using var client = new HttpClient(handler);
+        var collector = new AdoReportCollector(client, _ => Task.FromResult("fixture-token"), limits);
+        var snapshot = await collector.CollectAsync(
+            WorkRequest(new ReportSource("s", "org", "Project", "Project\\Team")), null, CancellationToken.None);
+        var history = snapshot.WorkItems.Single().History;
+        That(streams.Sum(stream => stream.BytesRead) > 128L * 1024 * 1024
+            && streams.Count == revisions && streams.All(stream => stream.WasDisposed)
+            && history.Length == revisions && history[^1].State == "Done"
+            && history.Select(entry => entry.Actor.Name).SequenceEqual(Enumerable.Range(1, revisions).Select(revision => $"Actor {revision}")),
+            "The configured Work Items collector must accept complete histories beyond the old 128 MiB cap without dropping revisions or actors.");
+
+        using var overriddenServices = ExportConfigurationTests.Build(new Dictionary<string, string?>
+        {
+            ["ReportExport:WorkItems:MaxCollectionBytes"] = "150"
+        });
+        using var overriddenScope = overriddenServices.CreateScope();
+        var overriddenLimits = overriddenScope.ServiceProvider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems");
+        var smallStreams = new List<GeneratedResponseStream>();
+        using var smallHandler = new AdoReportTestHttp((_, _) =>
+        {
+            var stream = EmptyWorkResponse(100);
+            smallStreams.Add(stream);
+            return Task.FromResult(StreamResponse(stream));
+        });
+        using var smallClient = new HttpClient(smallHandler);
+        var bounded = new AdoReportCollector(smallClient, _ => Task.FromResult("fixture-token"), overriddenLimits);
+        await FailsAsync(() => bounded.CollectAsync(WorkRequest(
+            new("first", "org-a", "Project", "Area"), new("second", "org-b", "Project", "Area")),
+            null, CancellationToken.None), "150-byte", "cumulative collection budget", "no partial report");
+        That(smallStreams.Count == 2 && smallStreams[1].BytesRead == 51 && smallStreams.All(stream => stream.WasDisposed),
+            "A configured Work Items budget must still abort at limit+1 and dispose every response.");
     }
 
     private static async Task FileContentResponseLimitAsync()
@@ -370,9 +455,11 @@ public static class AdoResponseBudgetTests
         private readonly byte repeatedValue;
         private readonly Action<int>? onRead;
         private readonly Func<int, CancellationToken, Task>? beforeRead;
+        private readonly int maximumReadSize;
 
         public GeneratedResponseStream(string prefix, long repeatedBytes, byte repeatedValue, string suffix,
-            Action<int>? onRead = null, Func<int, CancellationToken, Task>? beforeRead = null)
+            Action<int>? onRead = null, Func<int, CancellationToken, Task>? beforeRead = null,
+            int maximumReadSize = 37)
         {
             this.prefix = Encoding.UTF8.GetBytes(prefix);
             this.suffix = Encoding.UTF8.GetBytes(suffix);
@@ -380,6 +467,7 @@ public static class AdoResponseBudgetTests
             this.repeatedValue = repeatedValue;
             this.onRead = onRead;
             this.beforeRead = beforeRead;
+            this.maximumReadSize = maximumReadSize;
         }
 
         public long BytesRead { get; private set; }
@@ -408,7 +496,7 @@ public static class AdoResponseBudgetTests
         {
             ReadCalls++;
             var remaining = prefix.Length + repeatedBytes + suffix.Length - BytesRead;
-            var read = (int)Math.Min(Math.Min(remaining, buffer.Length), 37);
+            var read = (int)Math.Min(Math.Min(remaining, buffer.Length), maximumReadSize);
             for (var index = 0; index < read; index++)
             {
                 var position = BytesRead + index;

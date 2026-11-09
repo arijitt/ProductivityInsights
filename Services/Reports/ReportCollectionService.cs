@@ -3,7 +3,8 @@ using ProductivityInsights.Models.Reports;
 namespace ProductivityInsights.Services.Reports;
 
 public sealed class ReportCollectionService(
-    Func<IReportCollector> ado, Func<IReportCollector> incidents) : IReportCollector
+    Func<IReportCollector> ado, Func<IReportCollector> incidents,
+    Func<IReportCollector>? workItems = null) : IReportCollector
 {
     public Task<ReportSnapshot> CollectAsync(
         ReportRequest request, IProgress<string>? progress, CancellationToken cancellationToken)
@@ -24,7 +25,8 @@ public sealed class ReportCollectionService(
 
         return request.Analysis switch
         {
-            "workItems" or "gitCommits" => ado().CollectAsync(request, progress, cancellationToken),
+            "workItems" => (workItems ?? ado)().CollectAsync(request, progress, cancellationToken),
+            "gitCommits" => ado().CollectAsync(request, progress, cancellationToken),
             "incidentManagement" => incidents().CollectAsync(request, progress, cancellationToken),
             _ => throw new InvalidOperationException("Unsupported report analysis.")
         };
