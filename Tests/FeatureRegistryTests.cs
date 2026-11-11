@@ -144,7 +144,7 @@ public static class FeatureRegistryTests
             Set(component, "selectedOption", option);
             Set(component, "selectedView", "teams");
             Call(component, "ClearManagerSelection");
-            var expected = $"Select a manager and finish Fetch Reports before running {name}.";
+            var expected = $"Select a manager and finish Fetch Team before running {name}.";
             Require((string?)Get(component, "TeamsManagerWarning") == expected, "Missing-manager banner must name the selected Teams analysis.");
             Set(component, "selectedManager", new ProductivityInsights.Models.Teams.GraphUser { displayName = "Fixture manager" });
             Require((string?)Get(component, "TeamsManagerWarning") == expected, "Selecting a manager without fetching the roster must retain the warning.");

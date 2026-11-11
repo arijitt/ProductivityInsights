@@ -9,6 +9,7 @@ public static class GitZeroMemberTests
     public static void Run()
     {
         var baseline = ExportIntegrationTests.Snapshot(ExportIntegrationTests.Request(ExportIntegrationTests.PreparedComponent()));
+        VerifyDescendingCommitOrder(baseline);
         var manager = baseline.Request.Roster[0];
         var contributor = baseline.Request.Roster[1];
         var idle = new ReportIdentity("No <activity> & member", "idle@example.test", "idle");
@@ -120,6 +121,52 @@ public static class GitZeroMemberTests
                 "Only Teams detailed Git reports gain concise zero-commit person headings.");
     }
 
+    private static void VerifyDescendingCommitOrder(ReportSnapshot baseline)
+    {
+        var manager = baseline.Request.Roster[0];
+        var one = new ReportIdentity("One Commit", "one@example.test", "one");
+        var first = new ReportIdentity("First Tie", "first@example.test", "first");
+        var second = new ReportIdentity("Second Tie", "second@example.test", "second");
+        var idle = new ReportIdentity("Idle Member", "idle@example.test", "idle");
+        var overlap = baseline.Request.Sources[0] with { Key = "overlap" };
+        var single = Commit("single", one);
+        foreach (var hierarchy in new[] { true, false })
+        {
+            var snapshot = baseline with
+            {
+                Request = baseline.Request with
+                {
+                    Roster = [manager, one, first, second, idle],
+                    RosterParentIndices = hierarchy ? [null, 0, 0, 0, 0] : [],
+                    Sources = baseline.Request.Sources.Add(overlap)
+                },
+                Commits =
+                [
+                    single, single, single with { SourceKey = overlap.Key },
+                    Commit("first-1", first), Commit("first-2", first),
+                    Commit("second-1", second, 100), Commit("second-2", second, 100)
+                ],
+                PullRequests = [baseline.PullRequests[0] with { CompletedBy = one }]
+            };
+            Check(snapshot, [manager, idle]);
+            var main = MainElement(HtmlDetailedReportWriter.Write(snapshot));
+            Require(main.Descendants("h3").Where(element => Class(element, "report-person-heading"))
+                .Select(heading => heading.Value).SequenceEqual(new[]
+                {
+                    "\U0001F464 First Tie: 2 commits", "\U0001F464 Second Tie: 2 commits",
+                    "\U0001F464 One Commit: 1 commit", $"\U0001F464 {manager.DisplayName}: 0 commit",
+                    "\U0001F464 Idle Member: 0 commit"
+                }),
+                "Person sections must sort by distinct commit count, not PRs or lines, preserving captured order for ties and putting zero members last.");
+        }
+
+        GitReportRecord Commit(string id, ReportIdentity member, int added = 1) => baseline.Commits[0] with
+        {
+            Id = id, Author = member, Committer = member,
+            Files = [new("/file.cs", "edit", added, 0)]
+        };
+    }
+
     private static void Check(ReportSnapshot snapshot, ReportIdentity[] zeroMembers)
     {
         var document = ReportDocumentBuilder.Build(snapshot);
@@ -159,9 +206,9 @@ public static class GitZeroMemberTests
 
     private static void CheckPersonList(ReportSnapshot snapshot, XElement main)
     {
-        Require(snapshot.Request.Roster.Select(member => Target(main, member)).Distinct()
-            .SequenceEqual(main.Descendants("h3").Where(element => Class(element, "report-person-heading"))),
-            "All roster members, including unavailable members, must share one captured-order person list with shared groups appearing only once.");
+        Require(snapshot.Request.Roster.Select(member => Target(main, member)).ToHashSet()
+            .SetEquals(main.Descendants("h3").Where(element => Class(element, "report-person-heading"))),
+            "All roster members, including unavailable members, must retain their person destinations after sorting, with shared groups appearing only once.");
         var summary = main.Elements("h2").Single(heading => heading.Value.Contains("TEAM CODE COMMIT SUMMARY BY REPOSITORY", StringComparison.Ordinal));
         Require(main.Elements().SkipWhile(element => element != summary)
             .All(element => !Class(element, "report-person-details")),

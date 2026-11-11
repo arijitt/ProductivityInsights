@@ -54,12 +54,12 @@ public static class GitRoleIconTests
             }
             var headings = Regex.Matches(detailed, @"<h3\b[^>]*class=""report-person-heading""[^>]*>(.*?)</h3>", RegexOptions.Singleline)
                 .Select(match => Text(match.Groups[1].Value)).ToArray();
-            Require(headings.Length == 4 && headings[0] == AuthorIcon + " Example Manager: 0 commit"
-                && headings[1].StartsWith(AuthorIcon + " " + author.Name, StringComparison.Ordinal)
-                && headings[1].EndsWith(": 1 commit", StringComparison.Ordinal)
-                && headings[2] == detailedPairs[0] + ": 1 commit"
+            Require(headings.Length == 4 && headings[0].StartsWith(AuthorIcon + " " + author.Name, StringComparison.Ordinal)
+                && headings[0].EndsWith(": 1 commit", StringComparison.Ordinal)
+                && headings[1] == detailedPairs[0] + ": 1 commit"
+                && headings[2] == AuthorIcon + " Example Manager: 0 commit"
                 && headings[3] == AuthorIcon + " PR Only: 0 commit",
-                "Person headings must use the same name/count format in roster order, with the shared role group next to its first participant.");
+                "Person headings must use descending commit counts, preserving the direct/shared group order for ties and placing zero-commit members last.");
             foreach (var (label, icon) in new[] { ("Author:", AuthorIcon), ("Committer:", CommitterIcon) })
             {
                 var fields = Regex.Matches(detailed,

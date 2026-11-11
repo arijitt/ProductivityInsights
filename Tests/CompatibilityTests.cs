@@ -45,6 +45,13 @@ public static class CompatibilityTests
         value = NormalizeFeatureRegistryHooks(value);
         value = NormalizeTeamsSelectionDefaults(value);
         value = NormalizeWorkItemSourceSelections(value);
+        value = NormalizeHiloGitSelection(value);
+        value = value.Replace("class=\"btn btn-primary text-nowrap\"\n                                            @onclick=\"@(() => LoadOrgTreeForManagerAsync(user))\"",
+            "class=\"btn btn-primary btn-sm\"\n                                            @onclick=\"@(() => LoadOrgTreeForManagerAsync(user))\"")
+            .Replace("<button class=\"btn btn-primary text-nowrap\" @onclick=\"LoadOrgTreeAsync\"",
+                "<button class=\"btn btn-primary btn-sm\" @onclick=\"LoadOrgTreeAsync\"")
+            .Replace("                                        Fetch Team\n", "                                        Fetch Reports\n")
+            .Replace("<span>Fetch Team</span>", "<span>Fetch Reports</span>");
         value = RemoveRange(value, "    private string? TeamsManagerWarning =>",
             "    // ---- Teams view (manager org-tree) UI + handlers ----");
         value = value.Replace("        @if (TeamsManagerWarning is { } managerWarning)\n"
@@ -117,6 +124,9 @@ public static class CompatibilityTests
         .Replace("            \"One Infra - Reliability\" => \"A365\\\\One Infra\\\\Reliability\",\n", "")
         .Replace("        \"One Infra - Reliability\",\n", "")
         .Replace("        .Append(BuildTeamCombination(\"msdata\", \"A365\", \"One Infra - Foundations\", \"A365\\\\One Infra\\\\One Infra Foundations\"))\n", "")
+        .Replace("        .Append(BuildTeamCombination(\"msdata\", \"HDInsight\", \"Control Plane\", \"HDInsight\\\\HDInsight on K8s\\\\Control Plane\"))\n", "")
+        .Replace("        .Append(BuildTeamCombination(\"msdata\", \"HDInsight\", \"Control Plane\", \"HDInsight\\\\Security\\\\ControlPlane\"))\n", "")
+        .Replace("        .Append(BuildTeamCombination(\"msdata\", \"HDInsight\", \"HDInsight Team\", \"HDInsight\\\\HDI CP Platform\"))\n", "")
         .Replace("                                <option value=\"HDInsight\">HDInsight</option>",
             "                                <!--<option value=\"HDInsight\">HDInsight</option>-->")
         .Replace("@if (selectedProject == \"A365\" || selectedProject == \"HDInsight\")",
@@ -128,12 +138,20 @@ public static class CompatibilityTests
         .Replace("            \"HDInsight on K8s\" => \"HDInsight\\\\HDInsight on K8s\\\\Hilo Platform\",\n", "")
         .Replace("            \"HDI Product Management\" => \"HDInsight\\\\HDI Product Management\",\n", "")
         .Replace("            \"HDInsight Team\" => \"HDInsight\\\\Supportability\",\n", "")
+        .Replace("            \"Control Plane\" => \"HDInsight\\\\Control Plane\",\n", "")
+        .Replace("            \"Security\" => \"HDInsight\\\\Security\",\n", "")
         .Replace("    private static string GetProjectForTeam(string team) =>\n"
-            + "        team is \"HDInsight on K8s\" or \"HDI Product Management\" or \"HDInsight Team\" ? \"HDInsight\" : \"A365\";\n", "")
-        .Replace("        \"Lakehouse Job Execution and Capacities\",\n        \"HDInsight on K8s\",\n        \"HDI Product Management\",\n        \"HDInsight Team\"\n",
+            + "        team is \"HDInsight on K8s\" or \"HDI Product Management\" or \"HDInsight Team\" or \"Control Plane\" or \"Security\" ? \"HDInsight\" : \"A365\";\n", "")
+        .Replace("        \"Lakehouse Job Execution and Capacities\",\n        \"HDInsight on K8s\",\n        \"HDI Product Management\",\n        \"HDInsight Team\",\n        \"Control Plane\",\n        \"Security\"\n",
             "        \"Lakehouse Job Execution and Capacities\"\n")
         .Replace(".Select(team => BuildTeamCombination(\"msdata\", GetProjectForTeam(team), team, GetAreaPathForTeam(team)))",
             ".Select(team => BuildTeamCombination(\"msdata\", \"A365\", team, GetAreaPathForTeam(team)))");
+
+    private static string NormalizeHiloGitSelection(string value) =>
+        value.Replace("\"BBC-VHD\", \"BBC-Probes\", \"marlin\", \"HDInsight-Hilo\" };",
+            "\"BBC-VHD\", \"BBC-Probes\", \"marlin\" };")
+        .Replace("\"HDInsight-Main\", \"HDInsight-Hilo\", \"wildfire-livy\", \"wildfire-spark\", \"wildfire-delta\"",
+            "\"HDInsight-Main\", \"wildfire-livy\", \"wildfire-spark\", \"wildfire-delta\"");
 
     private static string NormalizeMultiSourceSelection(string value)
     {

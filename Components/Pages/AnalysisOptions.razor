@@ -265,7 +265,7 @@
                 <label class="form-label">Organization : Project : Team : Area Path</label>
                 <div class="team-dd">
                     <RadzenDropDown @bind-Value="@SelectedWorkItemSources"
-                                    Data="@teamCombinationOptions"
+                                    Data="@teamCombinationOptions.OrderBy(option => option, StringComparer.OrdinalIgnoreCase)"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
@@ -491,7 +491,7 @@
                 <label class="form-label">Organization : Project : Git Repository : Branch</label>
                 <div class="team-dd">
                     <RadzenDropDown @bind-Value="@SelectedGitSources"
-                                    Data="@gitCommitCombinationOptions"
+                                    Data="@gitCommitCombinationOptions.OrderBy(option => option, StringComparer.OrdinalIgnoreCase)"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
@@ -562,7 +562,7 @@
                 <label class="form-label">Owning Team</label>
                 <div class="team-dd">
                     <RadzenDropDown @bind-Value="@SelectedIncidentSources"
-                                    Data="@owningTeamOptions"
+                                    Data="@owningTeamOptions.OrderBy(option => option, StringComparer.OrdinalIgnoreCase)"
                                     Multiple="true"
                                     AllowClear="true"
                                     AllowSelectAll="true"
@@ -688,7 +688,7 @@
 
     private string? TeamsManagerWarning =>
         selectedView == "teams" && (selectedManager is null || orgTreeRoot is null || isLoadingOrgTree)
-            ? $"Select a manager and finish Fetch Reports before running {GetAnalysisTypeName().Replace(" Analysis", "", StringComparison.Ordinal)}."
+            ? $"Select a manager and finish Fetch Team before running {GetAnalysisTypeName().Replace(" Analysis", "", StringComparison.Ordinal)}."
             : null;
 
     // ---- Teams view (manager org-tree) UI + handlers ----
@@ -746,11 +746,11 @@
                                 <span class="d-flex align-items-center gap-2">
                                     <span class="text-muted small">@(user.mail ?? user.userPrincipalName)</span>
                                     <button type="button"
-                                            class="btn btn-primary btn-sm"
+                                            class="btn btn-primary text-nowrap"
                                             @onclick="@(() => LoadOrgTreeForManagerAsync(user))"
                                             @onclick:stopPropagation="true"
                                             disabled="@isLoadingOrgTree">
-                                        Fetch Reports
+                                        Fetch Team
                                     </button>
                                 </span>
                             </li>
@@ -775,7 +775,7 @@
                         <span class="text-muted small d-block">@(selectedManager.mail ?? selectedManager.userPrincipalName)</span>
                     </div>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary btn-sm" @onclick="LoadOrgTreeAsync" disabled="@isLoadingOrgTree">
+                        <button class="btn btn-primary text-nowrap" @onclick="LoadOrgTreeAsync" disabled="@isLoadingOrgTree">
                             @if (isLoadingOrgTree)
                             {
                                 <span class="spinner-border spinner-border-sm me-1" role="status"></span>
@@ -783,7 +783,7 @@
                             }
                             else
                             {
-                                <span>Fetch Reports</span>
+                                <span>Fetch Team</span>
                             }
                         </button>
                     </div>
@@ -1148,7 +1148,7 @@
 
         // Repositories that use "master" branch
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy",
-                                        "BBC-VHD", "BBC-Probes", "marlin" };
+                                        "BBC-VHD", "BBC-Probes", "marlin", "HDInsight-Hilo" };
 
         if (gitRepository == "wildfire-delta")
         {
@@ -1218,7 +1218,7 @@
         
         // Repositories that use "master" branch
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
-                                        "BBC-VHD", "BBC-Probes", "marlin" };
+                                        "BBC-VHD", "BBC-Probes", "marlin", "HDInsight-Hilo" };
         
         // wildfire-delta defaults to release/3.2 branch
         if (selectedGitRepository == "wildfire-delta")
@@ -1268,7 +1268,7 @@
     private bool IsMasterBranchApplicable()
     {
         var masterBranchRepos = new[] { "FeatureManagement", "aspaas", "wildfire-livy", 
-                                        "BBC-VHD", "BBC-Probes", "marlin" };
+                                        "BBC-VHD", "BBC-Probes", "marlin", "HDInsight-Hilo" };
         return masterBranchRepos.Contains(selectedGitRepository);
     }
 
@@ -1316,12 +1316,14 @@
             "HDInsight on K8s" => "HDInsight\\HDInsight on K8s\\Hilo Platform",
             "HDI Product Management" => "HDInsight\\HDI Product Management",
             "HDInsight Team" => "HDInsight\\Supportability",
+            "Control Plane" => "HDInsight\\Control Plane",
+            "Security" => "HDInsight\\Security",
             _ => "A365\\Trident\\DE_DevE\\Lakehouse Platform\\Lakehouse Job Execution and Capacities"
         };
     }
 
     private static string GetProjectForTeam(string team) =>
-        team is "HDInsight on K8s" or "HDI Product Management" or "HDInsight Team" ? "HDInsight" : "A365";
+        team is "HDInsight on K8s" or "HDI Product Management" or "HDInsight Team" or "Control Plane" or "Security" ? "HDInsight" : "A365";
 
     private bool IsAreaPathApplicable(string areaPath)
     {
@@ -3877,11 +3879,16 @@
         "One Infra - Reliability",
         "HDInsight on K8s",
         "HDI Product Management",
-        "HDInsight Team"
+        "HDInsight Team",
+        "Control Plane",
+        "Security"
     };
     private static readonly string[] teamCombinationOptions = teamOptions
         .Select(team => BuildTeamCombination("msdata", GetProjectForTeam(team), team, GetAreaPathForTeam(team)))
         .Append(BuildTeamCombination("msdata", "A365", "One Infra - Foundations", "A365\\One Infra\\One Infra Foundations"))
+        .Append(BuildTeamCombination("msdata", "HDInsight", "Control Plane", "HDInsight\\HDInsight on K8s\\Control Plane"))
+        .Append(BuildTeamCombination("msdata", "HDInsight", "Control Plane", "HDInsight\\Security\\ControlPlane"))
+        .Append(BuildTeamCombination("msdata", "HDInsight", "HDInsight Team", "HDInsight\\HDI CP Platform"))
         .ToArray();
     private HashSet<string> selectedTeams = new HashSet<string>(teamOptions, StringComparer.OrdinalIgnoreCase);
     private List<string> selectedTeamCombinations = new List<string>(teamCombinationOptions);
@@ -3899,7 +3906,7 @@
         }),
         ("msdata", "HDInsight", new[]
         {
-            "HDInsight-Main", "wildfire-livy", "wildfire-spark", "wildfire-delta"
+            "HDInsight-Main", "HDInsight-Hilo", "wildfire-livy", "wildfire-spark", "wildfire-delta"
         }),
         ("powerbi", "MWC", new[]
         {

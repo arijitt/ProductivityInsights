@@ -19,6 +19,7 @@ public static class TeamsSelectionTests
     public static void Run()
     {
         VerifyWorkItemSourceSelections();
+        VerifyHiloGitSelection();
         var component = new AnalysisOptions();
         VerifyAll(component);
         Require((string)Get(component, "selectedView")! == "details"
@@ -33,7 +34,7 @@ public static class TeamsSelectionTests
         Call(component, "OnViewSelected", "teams");
         VerifyAll(component);
         Require(!(bool)Get(component, "CanRunAnalysis")!,
-            "Selecting all sources must not bypass the manager/Fetch Reports prerequisite.");
+            "Selecting all sources must not bypass the manager/Fetch Team prerequisite.");
 
         foreach (var (analysis, selection, options, handler) in Selectors)
         {
@@ -112,6 +113,11 @@ public static class TeamsSelectionTests
             ("HDInsight", "HDInsight on K8s", areaPath),
             ("HDInsight", "HDI Product Management", @"HDInsight\HDI Product Management"),
             ("HDInsight", "HDInsight Team", @"HDInsight\Supportability"),
+            ("HDInsight", "Control Plane", @"HDInsight\Control Plane"),
+            ("HDInsight", "Control Plane", @"HDInsight\HDInsight on K8s\Control Plane"),
+            ("HDInsight", "Security", @"HDInsight\Security"),
+            ("HDInsight", "Control Plane", @"HDInsight\Security\ControlPlane"),
+            ("HDInsight", "HDInsight Team", @"HDInsight\HDI CP Platform"),
             ("A365", "One Infra - CS", @"A365\One Infra\Cluster Service"),
             ("A365", "One Infra - Foundations", @"A365\Synapse Jobs Service\BBC\Foundations"),
             ("A365", "One Infra - Foundations", @"A365\One Infra\One Infra Foundations"),
@@ -140,6 +146,41 @@ public static class TeamsSelectionTests
                 && captured[1].Project == project && captured[1].Team == team
                 && captured[1].Scope == area,
                 "Analysis and export must capture each selected source without relabeling its project or area.");
+        }
+    }
+
+    private static void VerifyHiloGitSelection()
+    {
+        const string combination = "msdata : HDInsight : HDInsight-Hilo : master";
+        Require(Options("gitCommitCombinationOptions")
+            .Where(option => option.Contains(" : HDInsight-Hilo : ", StringComparison.Ordinal))
+            .SequenceEqual(new[] { combination }),
+            "HDInsight-Hilo must have exactly one source option, qualified by project and master branch.");
+        foreach (var view in new[] { "details", "trends", "teams" })
+        {
+            var component = PreparedComponent("gitCommits");
+            Set(component, "selectedView", view);
+            var chosen = new List<string> { combination };
+            Set(component, "SelectedGitSources", chosen);
+            Call(component, "OnGitSourcesChanged", chosen);
+            var sources = (List<(string Org, string Project, string Repo, string Branch)>)
+                Call(component, "ParseSelectedGitCommitCombinations")!;
+            Require(sources.SequenceEqual(new[] { ("msdata", "HDInsight", "HDInsight-Hilo", "master") }),
+                $"{view} must preserve the master-only HDInsight-Hilo selection.");
+            Call(component, "BeginReportExportContext", 2);
+            var captured = Request(component).Sources.Single();
+            Require(captured.Organization == "msdata" && captured.Project == "HDInsight"
+                && captured.Scope == "HDInsight-Hilo" && captured.Branch == "master",
+                "Git analysis and export must retain HDInsight-Hilo's captured master branch.");
+            Call(component, "OnGitRepositoryChanged", new ChangeEventArgs { Value = "HDInsight-Hilo" });
+            Require((string)Get(component, "selectedTargetBranch")! == "master"
+                && (bool)Call(component, "IsMasterBranchApplicable")!
+                && !(bool)Call(component, "IsMainBranchApplicable")!
+                && !(bool)Call(component, "IsDevelopBranchApplicable")!
+                && !(bool)Call(component, "IsDeveloperBranchApplicable")!
+                && !(bool)Call(component, "IsRelease32BranchApplicable")!
+                && !(bool)Call(component, "IsSpark35MntBranchApplicable")!,
+                "The repository branch helpers must allow only master for HDInsight-Hilo.");
         }
     }
 

@@ -56,18 +56,28 @@ public static class ExportConfigurationTests
     private static void VerifyWorkItemBudgetConfiguration()
     {
         const string key = "ReportExport:WorkItems:MaxCollectionBytes";
+        const string responseKey = "ReportExport:WorkItems:MaxResponseBytes";
         foreach (var maximum in new[] { 256L * 1024 * 1024, 3L * 1024 * 1024 * 1024 })
         {
-            using var services = Build(new Dictionary<string, string?> { [key] = maximum.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            using var services = Build(new Dictionary<string, string?>
+            {
+                [key] = maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                [responseKey] = (32 * 1024 * 1024).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            });
             using var scope = services.CreateScope();
             var limits = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems");
-            CompatibilityTests.Require(limits.MaxCollectionBytes == maximum,
-                "Work Items export must use the configured cumulative byte limit, including values larger than Int32.");
+            CompatibilityTests.Require(limits.MaxCollectionBytes == maximum && limits.MaxResponseBytes == 32 * 1024 * 1024,
+                "Work Items export must bind independent response and cumulative limits, including cumulative values larger than Int32.");
             _ = scope.ServiceProvider.GetRequiredKeyedService<AdoReportCollector>("workItems");
         }
-        foreach (var invalid in new[] { "0", "-1", "invalid", "9223372036854775808" })
+        foreach (var (limitKey, invalidValues) in new[]
         {
-            using var services = Build(new Dictionary<string, string?> { [key] = invalid });
+            (key, new[] { "0", "-1", "invalid", "9223372036854775808" }),
+            (responseKey, new[] { "0", "-1", "invalid", "2147483648" })
+        })
+        foreach (var invalid in invalidValues)
+        {
+            using var services = Build(new Dictionary<string, string?> { [limitKey] = invalid });
             using var scope = services.CreateScope();
             _ = scope.ServiceProvider.GetRequiredService<IReportCollector>();
             _ = scope.ServiceProvider.GetRequiredService<AdoReportCollector>();
@@ -78,7 +88,7 @@ public static class ExportConfigurationTests
             }
             catch (InvalidOperationException exception)
             {
-                CompatibilityTests.Require(exception.Message.Contains(key),
+                CompatibilityTests.Require(exception.Message.Contains(limitKey),
                     "Invalid Work Items export budgets must identify their configuration key without blocking other collectors.");
             }
         }

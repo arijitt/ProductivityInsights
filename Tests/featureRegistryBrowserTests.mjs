@@ -618,12 +618,12 @@ export async function runFeatureRegistryBrowser({ fixture, url, profile, downloa
             }
         }
         await evaluate(`[...document.querySelectorAll('.manager-selection button')].find(button=>button.textContent.includes('Clear')).click()`);
-        await until(() => evaluate(`${runButton}.disabled`), "Fetch Reports prerequisite");
+        await until(() => evaluate(`${runButton}.disabled`), "Fetch Team prerequisite");
         if (fixture === "feature-teams") {
             for (const label of ["Work Items", "Git Commits", "Incident Resolutions", "Feature Registry"]) {
                 await clickTab(label);
                 await until(() => evaluate(`document.querySelector('.teams-manager-warning')?.textContent
-                    ===${JSON.stringify(`Select a manager and finish Fetch Reports before running ${label}.`)}`), "Teams prerequisite warning for " + label);
+                    ===${JSON.stringify(`Select a manager and finish Fetch Team before running ${label}.`)}`), "Teams prerequisite warning for " + label);
                 assert.equal(await evaluate(`document.querySelectorAll('.tab-pane.active .alert-warning[role=alert]').length`), 1,
                     "Each Teams selection must show one manager warning without duplicating Feature Registry validation");
                 for (const otherView of ["Details", "Trends"]) {

@@ -91,10 +91,10 @@ public static class SelectionAnalysisTests
                 Require(captured.Sources.Length == 2 && captured.Roster.IsEmpty && captured.View == view,
                     "Both selected sources must enter the captured export context in the correct non-Teams view.");
                 if (analysis == "workItems")
-                    Require(captured.Sources[1].Project == "A365"
-                        && captured.Sources[1].Team == "One Infra - Foundations"
-                        && captured.Sources[1].Scope == @"A365\One Infra\One Infra Foundations",
-                        "The second Foundations area must retain its actual team and exact scope for analysis and export.");
+                    Require(captured.Sources[1].Project == "HDInsight"
+                        && captured.Sources[1].Team == "HDInsight Team"
+                        && captured.Sources[1].Scope == @"HDInsight\HDI CP Platform",
+                        "The HDI CP Platform area must retain its actual team and exact scope for analysis and export.");
                 Set(component, property, new List<string>());
                 Require(!(bool)Get(component, "CanRunAnalysis")! && Request(component) == captured,
                     "Clear must disable analysis without mutating executed export inputs.");
@@ -147,8 +147,11 @@ public static class SelectionAnalysisTests
             if (source.Project == "HDInsight")
                 Require(source.Team == (source.Scope switch
                 {
-                    "HDInsight" or @"HDInsight\Supportability" => "HDInsight Team",
+                    "HDInsight" or @"HDInsight\Supportability" or @"HDInsight\HDI CP Platform" => "HDInsight Team",
                     @"HDInsight\HDI Product Management" => "HDI Product Management",
+                    @"HDInsight\Control Plane" or @"HDInsight\HDInsight on K8s\Control Plane" => "Control Plane",
+                    @"HDInsight\Security\ControlPlane" => "Control Plane",
+                    @"HDInsight\Security" => "Security",
                     _ => "HDInsight on K8s"
                 }),
                     "HDInsight selections must route each area through its actual Azure DevOps team.");
@@ -167,6 +170,11 @@ public static class SelectionAnalysisTests
                 @"A365\Synapse Jobs Service\BBC\Foundations" => 4,
                 @"A365\One Infra\One Infra Foundations" => 5,
                 @"A365\One Infra\Reliability" => 6,
+                @"HDInsight\Control Plane" => 7,
+                @"HDInsight\HDInsight on K8s\Control Plane" => 8,
+                @"HDInsight\Security" => 9,
+                @"HDInsight\Security\ControlPlane" => 10,
+                @"HDInsight\HDI CP Platform" => 11,
                 _ => source.Project == "HDInsight" ? 2 : 1
             };
             return new() { count = 1, value = [new()

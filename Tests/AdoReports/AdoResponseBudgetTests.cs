@@ -143,6 +143,7 @@ public static class AdoResponseBudgetTests
                 } });
             That(path.EndsWith("/revisions", StringComparison.Ordinal), "The configured budget must retain the existing revisions API.");
             var revision = int.Parse(AdoReportTestHttp.Query(message, "$skip")) + 1;
+            const string paddingMarker = "fixture-history-padding";
             var json = JsonSerializer.Serialize(new { value = new[]
             {
                 new
@@ -152,12 +153,14 @@ public static class AdoResponseBudgetTests
                     {
                         ["System.State"] = revision == revisions ? "Done" : "Active",
                         ["System.ChangedDate"] = DateTimeOffset.Parse("2020-01-01T00:00:00Z").AddMinutes(revision),
-                        ["System.ChangedBy"] = new { displayName = $"Actor {revision}" }
+                        ["System.ChangedBy"] = new { displayName = $"Actor {revision}" },
+                        ["System.Description"] = paddingMarker
                     }
                 }
             } });
-            var stream = new GeneratedResponseStream(json, 8 * 1024 * 1024 - Encoding.UTF8.GetByteCount(json),
-                (byte)' ', "", maximumReadSize: 81920);
+            var parts = json.Split(paddingMarker, StringSplitOptions.None);
+            var stream = new GeneratedResponseStream(parts[0], (revision == 1 ? 20 : 8) * 1024 * 1024,
+                (byte)'x', parts[1], maximumReadSize: 81920);
             streams.Add(stream);
             return StreamResponse(stream);
         });
@@ -166,15 +169,17 @@ public static class AdoResponseBudgetTests
         var snapshot = await collector.CollectAsync(
             WorkRequest(new ReportSource("s", "org", "Project", "Project\\Team")), null, CancellationToken.None);
         var history = snapshot.WorkItems.Single().History;
-        That(streams.Sum(stream => stream.BytesRead) > 128L * 1024 * 1024
+        That(streams[0].BytesRead > 16 * 1024 * 1024
+            && streams.Sum(stream => stream.BytesRead) > 128L * 1024 * 1024
             && streams.Count == revisions && streams.All(stream => stream.WasDisposed)
             && history.Length == revisions && history[^1].State == "Done"
             && history.Select(entry => entry.Actor.Name).SequenceEqual(Enumerable.Range(1, revisions).Select(revision => $"Actor {revision}")),
-            "The configured Work Items collector must accept complete histories beyond the old 128 MiB cap without dropping revisions or actors.");
+            "The configured Work Items collector must accept history pages over 16 MiB and collections over 128 MiB without dropping revisions or actors.");
 
         using var overriddenServices = ExportConfigurationTests.Build(new Dictionary<string, string?>
         {
-            ["ReportExport:WorkItems:MaxCollectionBytes"] = "150"
+            ["ReportExport:WorkItems:MaxCollectionBytes"] = "150",
+            ["ReportExport:WorkItems:MaxResponseBytes"] = "128"
         });
         using var overriddenScope = overriddenServices.CreateScope();
         var overriddenLimits = overriddenScope.ServiceProvider.GetRequiredKeyedService<AdoReportCollectionLimits>("workItems");
@@ -192,6 +197,20 @@ public static class AdoResponseBudgetTests
             null, CancellationToken.None), "150-byte", "cumulative collection budget", "no partial report");
         That(smallStreams.Count == 2 && smallStreams[1].BytesRead == 51 && smallStreams.All(stream => stream.WasDisposed),
             "A configured Work Items budget must still abort at limit+1 and dispose every response.");
+
+        foreach (var declared in new[] { false, true })
+        {
+            using var stream = EmptyWorkResponse(1000);
+            using var responseHandler = new AdoReportTestHttp((_, _) =>
+                Task.FromResult(StreamResponse(stream, declaredLength: declared ? 1000 : null)));
+            using var responseClient = new HttpClient(responseHandler);
+            var responseBounded = new AdoReportCollector(responseClient, _ => Task.FromResult("fixture-token"), overriddenLimits);
+            await FailsAsync(() => responseBounded.CollectAsync(
+                WorkRequest(new ReportSource("s", "org", "Project", "Area")), null, CancellationToken.None),
+                "128-byte response limit", "no partial report");
+            That(stream.BytesRead == (declared ? 0 : 129) && stream.WasDisposed,
+                "The configured response cap must reject oversized declared and streamed bodies without truncation.");
+        }
     }
 
     private static async Task FileContentResponseLimitAsync()

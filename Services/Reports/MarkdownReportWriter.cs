@@ -402,7 +402,7 @@ public static class MarkdownReportWriter
             if (teamsHtml && !document.Snapshot.SkippedSources.IsEmpty)
                 Paragraph("Person headings count collected commits only. Activity from skipped sources is unavailable, not zero.");
             var members = teamsHtml
-                ? presentation.TeamsDetailRows()
+                ? presentation.TeamsDetailRows().OrderByDescending(row => row.Commits)
                 : presentation.OverallRows.Where(row => row.Commits != 0)
                     .OrderByDescending(row => row.Commits).ThenByDescending(row => row.Added)
                     .ThenBy(presentation.Contributor, StringComparer.Ordinal);
@@ -708,7 +708,7 @@ public static class MarkdownReportWriter
             Paragraph("Contributed Incidents retains the ICM-path category of incidents outside Active, Created, Mitigated and Resolved. Records without in-period contributor evidence remain explicit, not credited to their owners. Full recorded evidence remains in the ICM-path sections below.");
             Paragraph("Each individual's closed-incident summary retains the recorded resolution/mitigation-actor attribution and duration calculations. It may cover different incidents than the current-ownership categories below. Counts and missing durations describe the collected snapshot only.");
             var closedGroups = presentation.ClosedGroupsByMemberKey();
-            foreach (var owner in presentation.OwnerGroups(document.Incidents))
+            foreach (var owner in presentation.OwnerGroups(document.Incidents).OrderByDescending(owner => owner.Incidents.Length))
             {
                 token.ThrowIfCancellationRequested();
                 var ownerStart = output.Length;

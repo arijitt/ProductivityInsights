@@ -5,6 +5,11 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
     const incidentCompleted = async () => (await fetch(new URL("incident-selection-fixture-state", url))).json();
     const runButton = `[...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='Run Analysis')`;
     const panel = `[...document.querySelectorAll('.rz-dropdown-panel,.rz-multiselect-panel')].find(node=>node.checkVisibility())`;
+    const defaultSources = {
+        "Work Items": "msdata : A365 : Cosmos on Azure Job Service : A365\\Cosmos Analytics\\Platforms\\Cosmos on Azure",
+        "Git Commits": "msdata : A365 : BBC-VHD : master",
+        "Incident Resolutions": "AZURESYNAPSEJOBSERVICE\\JobPlatform"
+    };
     const click = async expression => {
         const point = await evaluate(`(() => {
             const node=${expression}; node.scrollIntoView({block:'center'});
@@ -21,6 +26,14 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
         const popup=${panel}; return popup ? [...popup.querySelectorAll('[role=option]')]
             .filter(node=>node.getAttribute('aria-selected')==='true').map(node=>node.textContent.trim()) : null;
     })()`);
+    const clickSource = source => click(`[...(${panel}).querySelectorAll('[role=option]')]
+        .find(node=>node.textContent.trim()===${JSON.stringify(source)})`);
+    const checkDropdownOrder = async label => {
+        const options = await evaluate(`[...(${panel}).querySelectorAll('[role=option]')].map(node=>node.textContent.trim())`);
+        for (let index = 1; index < options.length; index++)
+            assert(options[index - 1].toUpperCase() <= options[index].toUpperCase(),
+                `${label} must use case-insensitive alphabetical order: ${options[index - 1]} before ${options[index]}`);
+    };
     const open = async () => {
         await click("document.querySelector('.team-dd [role=combobox]')");
         await until(() => selected(), "checkbox selector opened", 10000);
@@ -101,15 +114,17 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
     await until(() => evaluate(`Object.getOwnPropertyNames(${runButton} ?? {}).some(key=>key.startsWith('_blazorEvents_'))`), "hydrated selectors");
     for (const view of ["Details", "Trends"]) {
         await tab(view);
-        for (const [analysis, total] of [["Work Items",12],["Git Commits",23],["Incident Resolutions",5]]) {
+        for (const [analysis, total] of [["Work Items",17],["Git Commits",24],["Incident Resolutions",5]]) {
             const incidents = analysis === "Incident Resolutions";
             await tab(analysis);
             assert.equal(await evaluate("document.querySelectorAll('#teamSelect,#areaPathSelect,#gitRepositorySelect,#targetBranchSelect,#owningTeamSelect').length"), 0);
             await open();
             await checkDropdownInteractionContrast(`${view} ${analysis}`);
-            assert.equal((await selected()).length, 1, "Details/Trends retain the original default, independently of Teams");
+            await checkDropdownOrder(`${view} ${analysis}`);
+            assert.deepEqual(await selected(), [defaultSources[analysis]],
+                "Sorting must preserve the original Details/Trends default, even when it is not the first option");
             assert.equal(await evaluate(`(${panel}).querySelectorAll('[role=option]').length`), total);
-            await click(`(${panel}).querySelector('[role=option]')`);
+            await clickSource(defaultSources[analysis]);
             await until(async () => (await selected())?.length === 0, "clear individual default");
             await close();
             assert(await evaluate(`${runButton}.disabled`), "An empty selection cannot run");
@@ -118,11 +133,16 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
             await until(async () => (await selected())?.length === total, "select all");
             await click(`(${panel}).querySelector('[role=checkbox]')`);
             await until(async () => (await selected())?.length === 0, "clear all");
-            const first = analysis === "Work Items" ? (view === "Details" ? 6 : 7) : 0;
-            const second = incidents ? 3 : analysis === "Work Items" ? (view === "Details" ? 11 : 9) : 11;
-            await click(`(${panel}).querySelectorAll('[role=option]')[${first}]`);
+            const first = analysis === "Work Items" ? (view === "Details"
+                ? "msdata : HDInsight : Security : HDInsight\\Security"
+                : "msdata : A365 : One Infra - Reliability : A365\\One Infra\\Reliability") : defaultSources[analysis];
+            const second = incidents ? "HDINSIGHT\\ControlPlane" : analysis === "Work Items" ? (view === "Details"
+                ? "msdata : HDInsight : HDInsight Team : HDInsight\\HDI CP Platform"
+                : "msdata : HDInsight : HDI Product Management : HDInsight\\HDI Product Management")
+                : "msdata : HDInsight : HDInsight-Hilo : master";
+            await clickSource(first);
             await until(async () => (await selected())?.length === 1, "select one source");
-            await click(`(${panel}).querySelectorAll('[role=option]')[${second}]`);
+            await clickSource(second);
             await until(async () => (await selected())?.length === 2, "select a second source");
             await close();
             const before = (await calls()).length;
@@ -130,7 +150,7 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
             await run(2);
             // Edit the input immediately after confirmation; the running request must stay at two sources.
             await open();
-            await click(`(${panel}).querySelectorAll('[role=option]')[${first}]`);
+            await clickSource(first);
             await until(async () => (await selected())?.length === 1, "edit selection during collection");
             await close();
             await until(async () => {
@@ -139,15 +159,18 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
                     && (!incidents || await incidentCompleted() === completedBefore + 8)
                     && (view !== "Trends" || analysis !== "Git Commits" || recorded.filter(call=>call.startsWith("details:")).length === 2);
             }, "both captured sources collected");
+            if (analysis === "Git Commits")
+                assert((await calls()).slice(before).includes("commits:msdata/HDInsight/HDInsight-Hilo/master"),
+                    "HDInsight-Hilo collection must use master in Details and Trends");
             if (analysis === "Work Items") {
                 const [project, area] = view === "Details"
-                    ? ["A365", "A365\\One Infra\\One Infra Foundations"]
+                    ? ["HDInsight", "HDInsight\\HDI CP Platform"]
                     : ["HDInsight", "HDInsight\\HDI Product Management"];
                 assert((await calls()).slice(before).includes(`work:msdata/${project}/${area}`),
                     "Each selection must query its recorded project and area path");
                 if (view === "Details")
-                    assert((await calls()).slice(before).includes("work:msdata/A365/A365\\Synapse Jobs Service\\BBC\\Foundations"),
-                        "Selecting the new Foundations area must preserve the existing area from the same team");
+                    assert((await calls()).slice(before).includes("work:msdata/HDInsight/HDInsight\\Security"),
+                        "HDI CP Platform must collect alongside the selected Security area");
                 else
                     assert((await calls()).slice(before).includes("work:msdata/A365/A365\\One Infra\\Reliability"),
                         "Reliability must query its exact area alongside the selected HDInsight source");
@@ -162,7 +185,7 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
                 const detailCalls = (await calls()).slice(before);
                 assert(incidents ? detailCalls.some(call=>call.includes("incidents:Resolved:HDINSIGHT"))
                     : analysis === "Work Items" ? detailCalls.includes("history:msdata")
-                    : detailCalls.some(call=>call.includes("details:msdata/HDInsight/HDInsight-Main")),
+                    : detailCalls.includes("details:msdata/HDInsight/HDInsight-Hilo/master"),
                     "Drill-down must use captured sources after form edits");
             } else if (analysis === "Git Commits") {
                 await until(() => evaluate("document.querySelector('#analysisResultsContainer')?.textContent.includes('2 selection(s)')"), "combined Git trends");
@@ -188,10 +211,11 @@ export async function runSourceSelectionBrowser({ url, evaluate, until, cdp, pag
         "Restoring Incident Details must retain the executed owning teams");
     await tab("Work Items");
     await tab("Teams");
-    for (const [analysis, total] of [["Work Items",12],["Git Commits",23],["Incident Resolutions",5]]) {
+    for (const [analysis, total] of [["Work Items",17],["Git Commits",24],["Incident Resolutions",5]]) {
         await tab(analysis);
         await open();
         await checkDropdownInteractionContrast(`Teams ${analysis}`);
+        await checkDropdownOrder(`Teams ${analysis}`);
         assert.equal((await selected()).length, total, "Non-Teams changes must not alter Teams Select All");
         await close();
     }

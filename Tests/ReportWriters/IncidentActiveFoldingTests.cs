@@ -12,6 +12,7 @@ public static class IncidentActiveFoldingTests
     public static void Run()
     {
         var baseline = ReportWriterFixtures.IncidentSnapshot();
+        VerifyIndividualOrder(baseline);
         var first = baseline.Incidents[0];
         var additions = new[]
         {
@@ -141,6 +142,44 @@ public static class IncidentActiveFoldingTests
         {
             Incidents = contributed.Incidents.Select(item => item with { Title = longTitle }).ToImmutableArray()
         });
+    }
+
+    private static void VerifyIndividualOrder(ReportSnapshot baseline)
+    {
+        var alpha = new ReportIdentity("Alpha Owner", "alpha@example.test", "alpha");
+        var beta = new ReportIdentity("Beta Owner", "beta@example.test", "beta");
+        var zulu = new ReportIdentity("Zulu Owner", "zulu@example.test", "zulu");
+        var records = Enumerable.Range(1, 14).Select(id => baseline.Incidents[0] with
+        {
+            Id = id.ToString(CultureInfo.InvariantCulture),
+            Owner = id <= 2 ? alpha : id <= 4 ? beta : zulu
+        }).ToArray();
+        var snapshot = baseline with
+        {
+            Request = baseline.Request with { Roster = [zulu, beta, alpha], RosterParentIndices = [] },
+            Incidents = [.. records, .. records.Select(record => record with { SourceKey = "source-b" })],
+            IncidentActions = []
+        };
+        var document = ReportDocumentBuilder.Build(snapshot);
+        var html = HtmlDetailedReportWriter.Write(document);
+        var folds = ReportFoldMarkup.Parse(html);
+        CheckIndividuals(document, html, folds);
+        var owners = folds.Where(fold => fold.Kind == "owner" && fold.ParentStart is null);
+        Require(owners.Select(Summary).SequenceEqual(new[]
+        {
+            "\U0001F464 Zulu Owner (10 incident(s))",
+            "\U0001F464 Alpha Owner (2 incident(s))",
+            "\U0001F464 Beta Owner (2 incident(s))"
+        }), "Individuals must sort numerically by distinct incidents, not names, roster order, source repetitions or overlapping categories; ties retain name order.");
+        var active = folds.Single(fold => fold.Kind == "queue" && fold.ParentStart is null
+            && Summary(fold).StartsWith("\U0001F7E2 Active", StringComparison.Ordinal));
+        Require(folds.Where(fold => fold.Kind == "owner" && fold.ParentStart == active.Start).Select(Summary)
+            .SequenceEqual(new[]
+            {
+                "\U0001F464 Owning Contact: Alpha Owner (2 incident(s))",
+                "\U0001F464 Owning Contact: Beta Owner (2 incident(s))",
+                "\U0001F464 Owning Contact: Zulu Owner (10 incident(s))"
+            }), "Sorting individual sections must not reorder owning contacts within the ICM-path categories.");
     }
 
     private static void Check(ReportSnapshot snapshot, bool urlOverride = false, string? destination = null)
@@ -296,6 +335,11 @@ public static class IncidentActiveFoldingTests
         Require(owners.Length == expected.Length && owners.All(owner => owner.Start > start
             && owner.Start + owner.Length < pathStart),
             "All paths must combine into one independent collapsed group per captured owner, without inventing zero-activity owners.");
+        var counts = owners.Select(owner => int.Parse(
+            Regex.Match(Summary(owner), @"\(([\d,]+) incident\(s\)\)$").Groups[1].Value,
+            NumberStyles.AllowThousands, CultureInfo.InvariantCulture));
+        Require(counts.SequenceEqual(expected.Select(group => group.Count()).OrderDescending()),
+            "Individual sections must be ordered by descending silo-qualified incident count across all selected paths.");
         Require(!section.Contains("Visible incident metadata", StringComparison.Ordinal)
             && !section.Contains("Mitigation text", StringComparison.Ordinal),
             "Individual browsing must not multiply the supplemental full recorded evidence.");

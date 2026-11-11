@@ -177,8 +177,46 @@ try {
             await evaluate("document.querySelector('.team-dd [role=\"combobox\"]').click()");
             await until(() => selection(), "open Teams selection " + label, 10000);
         };
+        const checkFetchButton = async selector => {
+            assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent.trim()`),
+                "Fetch Team", "Teams roster button label: " + selector);
+            const samples = await evaluate(`(async () => {
+                const original=document.documentElement.getAttribute('data-bs-theme');
+                const samples=[];
+                const style=button=>{
+                    const css=getComputedStyle(button);
+                    return {height:button.getBoundingClientRect().height,
+                        ...Object.fromEntries(['font-size','font-weight','line-height','padding-top','padding-right',
+                            'padding-bottom','padding-left','border-radius','border-width','border-style','border-color',
+                            'background-color','color','box-shadow'].map(property=>[property,css.getPropertyValue(property)]))};
+                };
+                try {
+                    for(const theme of ['light','dark']) {
+                        document.documentElement.setAttribute('data-bs-theme',theme);
+                        await new Promise(resolve=>setTimeout(resolve,350));
+                        const search=[...document.querySelectorAll('.manager-selection button')]
+                            .find(button=>button.textContent.includes('Search'));
+                        samples.push({theme,search:style(search),fetch:style(document.querySelector(${JSON.stringify(selector)}))});
+                    }
+                } finally {
+                    if(original===null) document.documentElement.removeAttribute('data-bs-theme');
+                    else document.documentElement.setAttribute('data-bs-theme',original);
+                }
+                return samples;
+            })()`);
+            for (const sample of samples)
+                assert.deepEqual(sample.fetch, sample.search,
+                    `Fetch Team must match Search sizing and styling in ${sample.theme} mode: ${selector}`);
+        };
         await navigate("Teams");
-        const tabs = [["Work Items",12],["Git Commits",23],["Incident Resolutions",5]];
+        await checkFetchButton(".manager-results button");
+        await evaluate("document.querySelector('.manager-result-item').click()");
+        await until(() => evaluate("document.querySelector('.selected-manager-chip')?.textContent.includes('Fixture Manager')"),
+            "selected manager rendered");
+        await checkFetchButton(".selected-manager-chip button");
+        await evaluate("[...document.querySelectorAll('.manager-selection button')].find(button=>button.textContent.includes('Clear')).click()");
+        await until(() => evaluate("!document.querySelector('.selected-manager-chip')"), "cleared fixture manager");
+        const tabs = [["Work Items",17],["Git Commits",24],["Incident Resolutions",5]];
         for (const [label, total] of tabs) {
             await open(label);
             assert.deepEqual(await selection(), {total,selected:total,all:"true"}, label + " must default to Select All");
@@ -753,8 +791,12 @@ try {
                 assert(detailView.gitPersonList.allBeforeSummary && detailView.gitPersonList.allUniform,
                     "Every Git person, including unavailable members, must stay in the main list with the same heading style");
                 const indices = detailView.gitPersonList.rosterTargetIndices;
-                assert(indices.every((value,index)=>value>=0 && (index===0 || value>=indices[index-1])),
-                    "Person destinations must follow the captured hierarchy order, never a separate trailing list");
+                assert(indices.every(value=>value>=0),
+                    "Captured roster links must still reach real person sections after sorting");
+                const counts = detailView.personHeadings.map(heading=>
+                    Number(heading.match(/: ([\d,]+) commits?$/)[1].replaceAll(",", "")));
+                assert.deepEqual(counts, [...counts].sort((left,right)=>right-left),
+                    "Teams Git person sections must be ordered by descending collected commit count");
                 assert(!detailView.text.includes("No collected detail section is attributed to this roster member"),
                     "Teams Git must not retain the late per-member fallback sections");
             }
@@ -779,12 +821,13 @@ try {
                 for (const field of detailView.commitRoleFields)
                     assert.equal(field.icon, onlineRoleIcons[field.label], "Each exported commit role must use its on-screen icon");
                 assert.deepEqual(detailView.personHeadings, [
-                    '\u{1F464} Example Manager: 0 commit',
-                    roleIconFixture ? '\u{1F464} Author: Example Contributor / \u270D\uFE0F Committer: Zoe Lead: 1 commit'
-                        : '\u{1F464} Zoe Lead: 0 commit',
                     '\u{1F464} Example Contributor: 2 commits',
+                    ...(roleIconFixture
+                        ? ['\u{1F464} Author: Example Contributor / \u270D\uFE0F Committer: Zoe Lead: 1 commit',
+                            '\u{1F464} Example Manager: 0 commit']
+                        : ['\u{1F464} Example Manager: 0 commit', '\u{1F464} Zoe Lead: 0 commit']),
                     '\u{1F464} Aaron Peer: 0 commit'
-                ], "Active and zero-commit people must share one hierarchy-ordered list with consistent name/count headers");
+                ], "Person sections must use descending commit counts, stable zero-count ties and consistent name/count headers");
                 assert.deepEqual(detailView.zeroGitPeople,
                     (roleIconFixture ? ["Example Manager","Aaron Peer"] : ["Example Manager","Zoe Lead","Aaron Peer"]).map(name=>({
                         heading:`\u{1F464} ${name}: 0 commit`,content:"",linked:true,beforeSummary:true
@@ -805,7 +848,7 @@ try {
                     "Both detailed summary tables must distinguish the author/committer pair");
                 assert(detailView.personHeadings.some(heading => heading.includes(pair)),
                     "The shared contribution heading must preserve both role icons");
-                assert.equal(detailView.commitHeadings[0], '\u{1F504} PR #73: Shared change <safe> & [title]',
+                assert.equal(detailView.commitHeadings[2], '\u{1F504} PR #73: Shared change <safe> & [title]',
                     "Shared commits must use their recorded merge-subject PR number/title even without a captured PR completion");
                 assert(detailView.text.includes("Merged PR 73: Shared change <safe> & [title]")
                     && detailView.text.includes("Recorded shared merge body"),
@@ -819,6 +862,10 @@ try {
                 }, "Only the Teams global Active section must omit TTM/TTR; overall duration tables remain unchanged");
                 assert(detailView.incidentIndividuals.beforePaths && detailView.incidentIndividuals.bounded,
                     "The individuals section must group all owners before the existing ICM-path section");
+                const individualCounts = detailView.incidentIndividuals.owners.map(owner =>
+                    Number(owner.heading.match(/\(([\d,]+) incident\(s\)\)$/)[1].replaceAll(",", "")));
+                assert.deepEqual(individualCounts, [...individualCounts].sort((left,right)=>right-left),
+                    "Individual incident sections must use descending distinct incident counts");
                 for (const owner of detailView.incidentIndividuals.owners) {
                     assert.deepEqual(owner.statistics.headings, ["Severity counts", "TTD by severity", "TTM by severity", "TTR by severity"]);
                     assert.equal(owner.statistics.tables.length, 4);
@@ -860,15 +907,15 @@ try {
                     assert.deepEqual(detailView.incidentIndividuals.owners.map(owner=>({
                         heading:owner.heading, categories:owner.categories.map(category=>category.ids.map((id,index)=>category.silos[index]+':'+id))
                     })), [
-                        {heading:"\u{1F464} Aaron Peer (1 incident(s))",
-                            categories:[["2:43"],["2:43"],["2:43"],["2:43"],[]]},
                         {heading:"\u{1F464} Example Contributor (3 incident(s))",
                             categories:[["1:43","1:44"],["1:42","1:43","1:44"],["1:42","1:43","1:44"],["1:42","1:43","1:44"],[]]},
                         {heading:"\u{1F464} Example Manager (2 incident(s))",
                             categories:[[],[],[],[],["1:90","2:90"]]},
+                        {heading:"\u{1F464} Aaron Peer (1 incident(s))",
+                            categories:[["2:43"],["2:43"],["2:43"],["2:43"],[]]},
                         {heading:"\u{1F464} Zoe Lead (1 incident(s))",
                             categories:[["1:45"],["1:45"],["1:45"],["1:45"],[]]}
-                    ], "Cross-path owner groups must combine paths and aliases while leaving recorded contributor credit unchanged");
+                    ], "Cross-path owner groups must sort by distinct incident count, retain alphabetical ties and leave recorded contributor credit unchanged");
                 }
                 assert(detailView.incidentConsolidation.links > 0);
                 assert.deepEqual({...detailView.incidentConsolidation,links:0},

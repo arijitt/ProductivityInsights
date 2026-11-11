@@ -82,7 +82,18 @@ internal static class BrowserFixtureHost
             if (fixture.StartsWith("feature-", StringComparison.Ordinal))
                 return featureRegistry.Component();
             if (fixture is "teams-select-all" or "source-selection")
-                return new AnalysisOptions();
+            {
+                var selection = new AnalysisOptions();
+                if (fixture == "teams-select-all")
+                {
+                    ExportIntegrationTests.Set(selection, "managerSearchResults", new List<GraphUser>
+                    {
+                        new() { displayName = "Fixture Manager", mail = "manager@example.test" }
+                    });
+                    ExportIntegrationTests.Set(selection, "hasSearchedManagers", true);
+                }
+                return selection;
+            }
             var analysis = fixture is "incident-available-export" or "incident-unkeyed-export" or "incident-active-groups" ? "incidentManagement"
                 : fixture is "workItems" or "incidentManagement" ? fixture : "gitCommits";
             var component = ExportIntegrationTests.PreparedComponent(analysis);

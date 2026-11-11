@@ -41,10 +41,14 @@ public static class ReportServiceRegistration
     private static AdoReportCollectionLimits ReadWorkItemCollectionLimits(IConfiguration configuration)
     {
         const string key = "ReportExport:WorkItems:MaxCollectionBytes";
+        const string responseKey = "ReportExport:WorkItems:MaxResponseBytes";
         var maximum = configuration.GetValue<long?>(key) ?? 512L * 1024 * 1024;
         if (maximum <= 0)
             throw new InvalidOperationException($"{key} must be a positive number of bytes.");
-        return new AdoReportCollectionLimits { MaxCollectionBytes = maximum };
+        var responseMaximum = configuration.GetValue<int?>(responseKey) ?? 64 * 1024 * 1024;
+        if (responseMaximum <= 0)
+            throw new InvalidOperationException($"{responseKey} must be a positive number of bytes.");
+        return new AdoReportCollectionLimits { MaxResponseBytes = responseMaximum, MaxCollectionBytes = maximum };
     }
 
     private static IncidentReportCoverage ReadIncidentCoverage(IConfiguration configuration)
